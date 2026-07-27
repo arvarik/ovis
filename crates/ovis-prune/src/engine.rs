@@ -1,8 +1,8 @@
-use std::collections::HashMap;
 use crate::config::PruneConfig;
 use crate::dedup::MinHashDedupEngine;
 use crate::heuristics::{DocumentWithContent, HeuristicEvaluator, PruneCandidate};
 use crate::reporter::PruneAuditReport;
+use std::collections::HashMap;
 
 /// High-performance multi-stage Pruning Engine combining fast microsecond heuristics and MinHash LSH deduplication.
 pub struct PruningEngine {
@@ -185,7 +185,9 @@ mod tests {
         );
 
         let docs = vec![doc_stub, doc_valid, doc_dup];
-        let report = engine.evaluate_repository(&docs).expect("Evaluation failed");
+        let report = engine
+            .evaluate_repository(&docs)
+            .expect("Evaluation failed");
 
         assert_eq!(report.total_documents_evaluated, 3);
         assert!(report.total_candidates_flagged >= 2);

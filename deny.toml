@@ -28,11 +28,16 @@ ignore = [
     # only through `sqlx-mysql`, an optional sqlx feature OVIS does not enable, so
     # it is never compiled or linked.
     { id = "RUSTSEC-2023-0071", reason = "sqlx-mysql is optional and not enabled; rsa is never built" },
-    # Both from ratatui 0.26 in ovis-cli, neither reachable from the backend, both
-    # resolved by the CLI redesign's ratatui upgrade.
-    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; transitively via ratatui 0.26 (CLI only)" },
-    { id = "RUSTSEC-2026-0002", reason = "lru IterMut unsoundness; via ratatui 0.26 (CLI only), never called" },
+    # `paste` survived the CLI redesign's ratatui 0.26 -> 0.29 upgrade, which was
+    # expected to remove it: 0.29 still depends on it. It is a proc-macro used at
+    # compile time only, it is CLI-only, and nothing in the backend can reach it.
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; a compile-time proc-macro via ratatui 0.29 (CLI only)" },
 ]
+# Removed by the CLI redesign rather than ignored:
+#   RUSTSEC-2026-0002 — the `lru` unsoundness came with ratatui 0.26; 0.29 pulls
+#     an unaffected version.
+#   RUSTSEC-2025-0119 — `number_prefix` (unmaintained) came with indicatif 0.17;
+#     0.18 replaced it with `unit-prefix`.
 
 [licenses]
 # Permissive licenses only (cargo-deny spells it the American way). OVIS is deployed as a single binary that embeds

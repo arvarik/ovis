@@ -60,12 +60,17 @@ async fn summaries_count_documents_from_dcc_not_from_total_docs_indexed() {
 #[tokio::test]
 async fn a_park_sentinel_marks_the_pair_parked_and_is_passed_through_verbatim() {
     let Some(db) = common::seeded().await else {
-        return common::skip("a_park_sentinel_marks_the_pair_parked_and_is_passed_through_verbatim");
+        return common::skip(
+            "a_park_sentinel_marks_the_pair_parked_and_is_passed_through_verbatim",
+        );
     };
 
     let summaries = connectors::list_summaries(&db.pool).await.unwrap();
     let parked = summaries.iter().find(|s| s.name == "parked-web").unwrap();
-    assert!(parked.parked, "the resilience-cron sentinel was not detected");
+    assert!(
+        parked.parked,
+        "the resilience-cron sentinel was not detected"
+    );
     assert_eq!(
         parked.last_attempt.as_ref().unwrap().error_msg.as_deref(),
         Some("first-pass already complete"),
@@ -122,7 +127,10 @@ async fn cc_pair_detail_exposes_config_but_never_credential_secrets() {
         "the encrypted credential blob must never be read, let alone serialised"
     );
 
-    assert!(connectors::get_detail(&db.pool, 9999).await.unwrap().is_none());
+    assert!(connectors::get_detail(&db.pool, 9999)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -131,13 +139,17 @@ async fn attempt_aggregates_are_scoped_and_global() {
         return common::skip("attempt_aggregates_are_scoped_and_global");
     };
 
-    let global = connectors::attempt_aggregates(&db.pool, None).await.unwrap();
+    let global = connectors::attempt_aggregates(&db.pool, None)
+        .await
+        .unwrap();
     assert_eq!(global.in_progress, 2);
     assert_eq!(global.success, 1);
     assert_eq!(global.failed, 2);
     assert_eq!(global.canceled, 1);
 
-    let scoped = connectors::attempt_aggregates(&db.pool, Some(1)).await.unwrap();
+    let scoped = connectors::attempt_aggregates(&db.pool, Some(1))
+        .await
+        .unwrap();
     assert_eq!(scoped.in_progress, 1);
     assert_eq!(scoped.success, 1);
     assert_eq!(scoped.canceled, 1);
@@ -165,7 +177,9 @@ async fn stalled_detection_uses_heartbeat_staleness_not_document_counts() {
         return common::skip("stalled_detection_uses_heartbeat_staleness_not_document_counts");
     };
 
-    let attempts = indexing::list_attempts(&db.pool, None, None, 50, 0).await.unwrap();
+    let attempts = indexing::list_attempts(&db.pool, None, None, 50, 0)
+        .await
+        .unwrap();
     let by_id = |id: i32| attempts.iter().find(|a| a.id == id).unwrap();
 
     // Attempt 1: running, heartbeat a minute ago, *zero* documents indexed.
@@ -195,8 +209,15 @@ async fn attempts_are_filterable_by_pair_and_status_and_counted_consistently() {
         return common::skip("attempts_are_filterable_by_pair_and_status_and_counted_consistently");
     };
 
-    let all = indexing::list_attempts(&db.pool, None, None, 50, 0).await.unwrap();
-    assert_eq!(all.len() as i64, indexing::count_attempts(&db.pool, None, None).await.unwrap());
+    let all = indexing::list_attempts(&db.pool, None, None, 50, 0)
+        .await
+        .unwrap();
+    assert_eq!(
+        all.len() as i64,
+        indexing::count_attempts(&db.pool, None, None)
+            .await
+            .unwrap()
+    );
     // Newest first.
     let times: Vec<_> = all.iter().map(|a| a.time_updated).collect();
     let mut sorted = times.clone();
@@ -209,18 +230,27 @@ async fn attempts_are_filterable_by_pair_and_status_and_counted_consistently() {
         .unwrap();
     assert_eq!(running.len(), 2, "status matching must be case-insensitive");
     assert_eq!(
-        indexing::count_attempts(&db.pool, None, Some(&statuses)).await.unwrap(),
+        indexing::count_attempts(&db.pool, None, Some(&statuses))
+            .await
+            .unwrap(),
         2
     );
 
-    let scoped = indexing::list_attempts(&db.pool, Some(1), None, 50, 0).await.unwrap();
+    let scoped = indexing::list_attempts(&db.pool, Some(1), None, 50, 0)
+        .await
+        .unwrap();
     assert_eq!(scoped.len(), 3);
     assert!(scoped.iter().all(|a| a.cc_pair_id == 1));
-    assert!(scoped.iter().all(|a| a.connector_name.as_deref() == Some("tildes-like")));
+    assert!(scoped
+        .iter()
+        .all(|a| a.connector_name.as_deref() == Some("tildes-like")));
 
     let one = indexing::get_attempt(&db.pool, 1).await.unwrap().unwrap();
     assert_eq!(one.id, 1);
-    assert!(indexing::get_attempt(&db.pool, 9999).await.unwrap().is_none());
+    assert!(indexing::get_attempt(&db.pool, 9999)
+        .await
+        .unwrap()
+        .is_none());
 }
 
 #[tokio::test]
@@ -229,14 +259,20 @@ async fn per_document_errors_are_listed_with_an_unresolved_filter() {
         return common::skip("per_document_errors_are_listed_with_an_unresolved_filter");
     };
 
-    let all = indexing::list_attempt_errors(&db.pool, None, false, 50, 0).await.unwrap();
+    let all = indexing::list_attempt_errors(&db.pool, None, false, 50, 0)
+        .await
+        .unwrap();
     assert_eq!(all.len(), 2);
     assert_eq!(
-        indexing::count_attempt_errors(&db.pool, None, false).await.unwrap(),
+        indexing::count_attempt_errors(&db.pool, None, false)
+            .await
+            .unwrap(),
         2
     );
 
-    let unresolved = indexing::list_attempt_errors(&db.pool, None, true, 50, 0).await.unwrap();
+    let unresolved = indexing::list_attempt_errors(&db.pool, None, true, 50, 0)
+        .await
+        .unwrap();
     assert_eq!(unresolved.len(), 1);
     assert!(!unresolved[0].is_resolved);
     assert_eq!(
@@ -244,12 +280,16 @@ async fn per_document_errors_are_listed_with_an_unresolved_filter() {
         Some("https://paused.example/broken")
     );
 
-    let scoped = indexing::list_attempt_errors(&db.pool, Some(2), false, 50, 0).await.unwrap();
-    assert_eq!(scoped.len(), 2);
-    assert!(indexing::list_attempt_errors(&db.pool, Some(1), false, 50, 0)
+    let scoped = indexing::list_attempt_errors(&db.pool, Some(2), false, 50, 0)
         .await
-        .unwrap()
-        .is_empty());
+        .unwrap();
+    assert_eq!(scoped.len(), 2);
+    assert!(
+        indexing::list_attempt_errors(&db.pool, Some(1), false, 50, 0)
+            .await
+            .unwrap()
+            .is_empty()
+    );
 }
 
 #[tokio::test]
@@ -258,7 +298,9 @@ async fn worker_level_errors_are_readable() {
         return common::skip("worker_level_errors_are_readable");
     };
 
-    let all = indexing::list_background_errors(&db.pool, None, 50).await.unwrap();
+    let all = indexing::list_background_errors(&db.pool, None, 50)
+        .await
+        .unwrap();
     assert_eq!(all.len(), 1);
     assert!(all[0].message.contains("celery"));
     assert_eq!(all[0].cc_pair_id, Some(2));
@@ -318,19 +360,33 @@ async fn top_connectors_can_be_ranked_by_documents_or_recency() {
         return common::skip("top_connectors_can_be_ranked_by_documents_or_recency");
     };
 
-    let by_docs = connectors::top_connectors(&db.pool, false, 10).await.unwrap();
+    let by_docs = connectors::top_connectors(&db.pool, false, 10)
+        .await
+        .unwrap();
     assert_eq!(by_docs.first().unwrap().name, "tildes-like");
     let counts: Vec<i64> = by_docs.iter().map(|c| c.doc_count).collect();
     let mut sorted = counts.clone();
     sorted.sort_by(|a, b| b.cmp(a));
     assert_eq!(counts, sorted);
 
-    let by_recent = connectors::top_connectors(&db.pool, true, 10).await.unwrap();
+    let by_recent = connectors::top_connectors(&db.pool, true, 10)
+        .await
+        .unwrap();
     // The most recently indexed pair leads, and the never-indexed ones sort last.
     assert_eq!(by_recent.first().unwrap().name, "tildes-like");
-    assert!(by_recent.last().unwrap().last_successful_index_time.is_none());
+    assert!(by_recent
+        .last()
+        .unwrap()
+        .last_successful_index_time
+        .is_none());
 
-    assert_eq!(connectors::top_connectors(&db.pool, false, 2).await.unwrap().len(), 2);
+    assert_eq!(
+        connectors::top_connectors(&db.pool, false, 2)
+            .await
+            .unwrap()
+            .len(),
+        2
+    );
 }
 
 #[tokio::test]
@@ -352,7 +408,9 @@ async fn tag_facets_are_counted_and_filterable() {
     sorted.sort_by(|a, b| b.cmp(a));
     assert_eq!(counts, sorted);
 
-    let authors = tags::list_facets(&db.pool, Some("author"), None, 50).await.unwrap();
+    let authors = tags::list_facets(&db.pool, Some("author"), None, 50)
+        .await
+        .unwrap();
     assert!(authors.iter().all(|f| f.key == "author"));
     assert_eq!(authors.len(), 2);
 
@@ -408,7 +466,10 @@ async fn per_source_stats_count_each_document_once() {
 
     // 9 WEB documents, one of which is attached to two WEB connectors — so a
     // naive count(*) would report 10.
-    assert_eq!(web.documents, 9, "a multi-connector document was double-counted");
+    assert_eq!(
+        web.documents, 9,
+        "a multi-connector document was double-counted"
+    );
     assert_eq!(web.connectors, 3);
     assert_eq!(github.documents, 1);
     assert_eq!(github.connectors, 1);
@@ -486,7 +547,10 @@ async fn search_settings_resolves_the_present_row_not_a_past_one() {
     // The fixture holds a PAST row named `danswer_chunk` alongside the PRESENT
     // one. Picking the wrong one — or using a `danswer_chunk*` wildcard — is how a
     // delete fans out across a secondary index during a re-embed.
-    assert_eq!(settings.index_name, "danswer_chunk_snowflake_arctic_embed_m");
+    assert_eq!(
+        settings.index_name,
+        "danswer_chunk_snowflake_arctic_embed_m"
+    );
     assert_eq!(settings.model_name, "snowflake-arctic-embed:m");
     assert_eq!(settings.model_dim, 768);
     assert!(!settings.index_name.contains('*'));
@@ -519,7 +583,9 @@ async fn the_pending_index_delete_queue_is_created_and_drains_its_own_schema() {
         "OVIS must be able to create its own schema"
     );
     assert_eq!(
-        ovis_core::db::pending_deletes::pending_count(&db.pool).await.unwrap(),
+        ovis_core::db::pending_deletes::pending_count(&db.pool)
+            .await
+            .unwrap(),
         0
     );
 
@@ -527,7 +593,9 @@ async fn the_pending_index_delete_queue_is_created_and_drains_its_own_schema() {
         .await
         .unwrap();
     assert_eq!(
-        ovis_core::db::pending_deletes::pending_count(&db.pool).await.unwrap(),
+        ovis_core::db::pending_deletes::pending_count(&db.pool)
+            .await
+            .unwrap(),
         1
     );
 
@@ -536,7 +604,9 @@ async fn the_pending_index_delete_queue_is_created_and_drains_its_own_schema() {
         .await
         .unwrap();
     assert_eq!(
-        ovis_core::db::pending_deletes::pending_count(&db.pool).await.unwrap(),
+        ovis_core::db::pending_deletes::pending_count(&db.pool)
+            .await
+            .unwrap(),
         1
     );
 

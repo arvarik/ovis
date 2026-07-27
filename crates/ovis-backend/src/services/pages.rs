@@ -3,8 +3,8 @@
 use std::sync::Arc;
 
 use ovis_core::api_types::{
-    BatchDeleteFailure, BatchDeleteResponse, ChunkItem, ChunksResponse, DeleteOutcome, ListResponse,
-    PageDetail, PageListItem, PagePatch, PatchResponse,
+    BatchDeleteFailure, BatchDeleteResponse, ChunkItem, ChunksResponse, DeleteOutcome,
+    ListResponse, PageDetail, PageListItem, PagePatch, PatchResponse,
 };
 use ovis_core::cursor::{Cursor, SortOrder};
 use ovis_core::db::documents::{
@@ -43,7 +43,10 @@ pub struct ListRequest {
 /// The row fetch and the count run **concurrently**: they are independent
 /// queries, and serialising them would make every list response as slow as the
 /// sum rather than the slower of the two.
-pub async fn list(state: &AppState, request: ListRequest) -> Result<ListResponse<PageListItem>, AppError> {
+pub async fn list(
+    state: &AppState,
+    request: ListRequest,
+) -> Result<ListResponse<PageListItem>, AppError> {
     let runtime = state.runtime();
     runtime.requires_column("document", "chunk_count")?;
 
@@ -59,10 +62,7 @@ pub async fn list(state: &AppState, request: ListRequest) -> Result<ListResponse
         Some(cursor) => Position::After(cursor),
         // The offset comes from the *requested* limit, not the `limit + 1` used
         // below to detect a next page.
-        None => Position::Offset(documents::offset_for_page(
-            page.unwrap_or(1),
-            request.limit,
-        )),
+        None => Position::Offset(documents::offset_for_page(page.unwrap_or(1), request.limit)),
     };
 
     // One extra row tells us whether another page exists without a second query.
@@ -88,7 +88,11 @@ pub async fn list(state: &AppState, request: ListRequest) -> Result<ListResponse
     }
 
     let next_cursor = has_more
-        .then(|| items.last().map(|item| Cursor::after(request.sort, item).encode()))
+        .then(|| {
+            items
+                .last()
+                .map(|item| Cursor::after(request.sort, item).encode())
+        })
         .flatten();
 
     Ok(ListResponse {
@@ -469,7 +473,9 @@ pub async fn patch(
             .update_document_title(&runtime.index_name, id, title)
             .await
         {
-            Ok(updated) => tracing::info!(document_id = %id, chunks_updated = updated, "synced title to the index"),
+            Ok(updated) => {
+                tracing::info!(document_id = %id, chunks_updated = updated, "synced title to the index")
+            }
             Err(err) => {
                 index_synced = false;
                 tracing::warn!(document_id = %id, error = %err, "title index sync failed");
@@ -588,12 +594,9 @@ pub async fn batch_delete(
                     "batch index cleanup failed; queueing for retry"
                 );
                 for id in &committed {
-                    let _ = ovis_core::db::pending_deletes::enqueue(
-                        &state.db,
-                        id,
-                        &err.to_string(),
-                    )
-                    .await;
+                    let _ =
+                        ovis_core::db::pending_deletes::enqueue(&state.db, id, &err.to_string())
+                            .await;
                 }
                 index_cleanup_pending += committed.len();
                 deleted += committed.len();

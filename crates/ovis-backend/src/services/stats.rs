@@ -205,7 +205,11 @@ pub async fn top_connectors(
     by_recent: bool,
     limit: i64,
 ) -> Result<Vec<TopConnector>, AppError> {
-    let key = format!("top:{}:{}", if by_recent { "recent" } else { "docs" }, limit);
+    let key = format!(
+        "top:{}:{}",
+        if by_recent { "recent" } else { "docs" },
+        limit
+    );
     cached(state, &key, || async {
         Ok(connectors::top_connectors(&state.db, by_recent, limit).await?)
     })

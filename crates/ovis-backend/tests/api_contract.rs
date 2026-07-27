@@ -64,7 +64,11 @@ async fn mock_opensearch() -> MockServer {
                 // meta-only request is genuinely tested and not just assumed.
                 let excludes: Vec<String> = body["_source"]["excludes"]
                     .as_array()
-                    .map(|a| a.iter().filter_map(|v| v.as_str().map(String::from)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|v| v.as_str().map(String::from))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 let after = body["search_after"][0].as_i64();
                 if after.is_some() {
@@ -186,7 +190,9 @@ async fn mock_opensearch() -> MockServer {
     // Root ping, for /system/health.
     Mock::given(method("GET"))
         .and(path_regex(r"^/$"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "version": { "number": "3.0.0" } })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "version": { "number": "3.0.0" } })),
+        )
         .mount(&server)
         .await;
 
@@ -298,7 +304,10 @@ impl Reply {
             .unwrap_or_else(|e| panic!("expected JSON, got {:?}: {}", self.body, e))
     }
     fn error_code(&self) -> String {
-        self.json()["error"]["code"].as_str().unwrap_or("").to_string()
+        self.json()["error"]["code"]
+            .as_str()
+            .unwrap_or("")
+            .to_string()
     }
     fn req_id(&self) -> String {
         self.json()["error"]["req_id"]
@@ -430,16 +439,17 @@ async fn a_cursor_from_one_sort_is_rejected_by_another() {
         return skip("a_cursor_from_one_sort_is_rejected_by_another");
     };
 
-    let cursor = get(&h.app, "/api/v1/pages?limit=2")
-        .await
-        .json()["next_cursor"]
+    let cursor = get(&h.app, "/api/v1/pages?limit=2").await.json()["next_cursor"]
         .as_str()
         .unwrap()
         .to_string();
 
     let reply = get(
         &h.app,
-        &format!("/api/v1/pages?limit=2&sort=chunks_desc&cursor={}", enc(&cursor)),
+        &format!(
+            "/api/v1/pages?limit=2&sort=chunks_desc&cursor={}",
+            enc(&cursor)
+        ),
     )
     .await;
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
@@ -456,7 +466,9 @@ async fn server_side_presets_replace_the_uis_client_side_filtering() {
         return skip("server_side_presets_replace_the_uis_client_side_filtering");
     };
 
-    let stubs = get(&h.app, "/api/v1/pages?chunk_min=0&chunk_max=0").await.json();
+    let stubs = get(&h.app, "/api/v1/pages?chunk_min=0&chunk_max=0")
+        .await
+        .json();
     assert_eq!(stubs["total"], 1);
     assert_eq!(stubs["items"][0]["chunk_count"], 0);
 
@@ -591,7 +603,10 @@ async fn chunks_are_paged_and_never_carry_vectors() {
     // The old detail response shipped full embedding arrays plus a redundant
     // 6-float sample alongside them.
     let rendered = body.to_string();
-    assert!(!rendered.contains("content_vector"), "a vector leaked into the chunk list");
+    assert!(
+        !rendered.contains("content_vector"),
+        "a vector leaked into the chunk list"
+    );
     assert!(!rendered.contains("embedding_sample"));
 
     let meta_only = get(
@@ -797,7 +812,10 @@ async fn the_unfiltered_grand_total_is_labelled_when_it_is_an_estimate() {
     for _ in 0..40 {
         let reply = get(&h.app, "/api/v1/pages?limit=1").await.json();
         if reply["total_exact"] == json!(true) {
-            assert_eq!(reply["total"], 10, "the exact count disagrees with the fixture");
+            assert_eq!(
+                reply["total"], 10,
+                "the exact count disagrees with the fixture"
+            );
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
@@ -815,7 +833,10 @@ async fn deleting_a_missing_document_is_a_404_not_a_fake_success() {
         &h.app,
         Request::builder()
             .method("DELETE")
-            .uri(format!("/api/v1/pages/{}", enc("https://example.com/never")))
+            .uri(format!(
+                "/api/v1/pages/{}",
+                enc("https://example.com/never")
+            ))
             .body(Body::empty())
             .unwrap(),
     )
@@ -893,7 +914,9 @@ async fn search_hydrates_hits_from_postgres_and_admits_degradation() {
 
     // This index has no populated kNN field, so a semantic request must say it
     // fell back rather than returning nothing.
-    let semantic = get(&h.app, "/api/v1/search?q=match&mode=semantic").await.json();
+    let semantic = get(&h.app, "/api/v1/search?q=match&mode=semantic")
+        .await
+        .json();
     assert_eq!(semantic["mode"], "semantic");
     assert_eq!(semantic["degraded"], "no_knn_field");
     assert!(
@@ -930,7 +953,9 @@ async fn connector_sub_resources_are_paginated_and_label_their_window() {
         return skip("connector_sub_resources_are_paginated_and_label_their_window");
     };
 
-    let attempts = get(&h.app, "/api/v1/connectors/1/attempts?limit=2").await.json();
+    let attempts = get(&h.app, "/api/v1/connectors/1/attempts?limit=2")
+        .await
+        .json();
     assert_eq!(attempts["total"], 3);
     assert_eq!(attempts["items"].as_array().unwrap().len(), 2);
     assert_eq!(attempts["has_more"], true);
@@ -941,7 +966,9 @@ async fn connector_sub_resources_are_paginated_and_label_their_window() {
         "the rolling retention must be stated so an empty list is not misread"
     );
 
-    let docs = get(&h.app, "/api/v1/connectors/1/docs?limit=3").await.json();
+    let docs = get(&h.app, "/api/v1/connectors/1/docs?limit=3")
+        .await
+        .json();
     assert_eq!(docs["total"], 8);
     assert_eq!(docs["items"].as_array().unwrap().len(), 3);
 
@@ -1008,13 +1035,18 @@ async fn indexing_telemetry_is_exposed_globally() {
         return skip("indexing_telemetry_is_exposed_globally");
     };
 
-    let all = get(&h.app, "/api/v1/indexing/attempts?limit=10").await.json();
+    let all = get(&h.app, "/api/v1/indexing/attempts?limit=10")
+        .await
+        .json();
     assert_eq!(all["total"], 6);
 
     let running = get(&h.app, "/api/v1/indexing/attempts?status=in_progress")
         .await
         .json();
-    assert_eq!(running["total"], 2, "status filtering must be case-insensitive");
+    assert_eq!(
+        running["total"], 2,
+        "status filtering must be case-insensitive"
+    );
     let stalled: Vec<bool> = running["items"]
         .as_array()
         .unwrap()
@@ -1030,7 +1062,9 @@ async fn indexing_telemetry_is_exposed_globally() {
         StatusCode::NOT_FOUND
     );
 
-    let background = get(&h.app, "/api/v1/indexing/background-errors").await.json();
+    let background = get(&h.app, "/api/v1/indexing/background-errors")
+        .await
+        .json();
     assert_eq!(background.as_array().unwrap().len(), 1);
 }
 
@@ -1061,9 +1095,14 @@ async fn stats_endpoints_answer_with_live_numbers() {
         .iter()
         .find(|s| s["source"] == "WEB")
         .unwrap();
-    assert_eq!(web["documents"], 9, "a multi-connector document was double-counted");
+    assert_eq!(
+        web["documents"], 9,
+        "a multi-connector document was double-counted"
+    );
 
-    let top = get(&h.app, "/api/v1/stats/connectors/top?limit=2").await.json();
+    let top = get(&h.app, "/api/v1/stats/connectors/top?limit=2")
+        .await
+        .json();
     assert_eq!(top.as_array().unwrap().len(), 2);
 
     let timeline = get(&h.app, "/api/v1/stats/timeline?window=7d&bucket=1d")
@@ -1082,10 +1121,16 @@ async fn tag_facets_are_served_and_cached() {
 
     let facets = get(&h.app, "/api/v1/tags?limit=10").await.json();
     let items = facets.as_array().unwrap();
-    assert!(items.iter().any(|f| f["key"] == "author" && f["doc_count"] == 2));
+    assert!(items
+        .iter()
+        .any(|f| f["key"] == "author" && f["doc_count"] == 2));
 
     let scoped = get(&h.app, "/api/v1/tags?key=author").await.json();
-    assert!(scoped.as_array().unwrap().iter().all(|f| f["key"] == "author"));
+    assert!(scoped
+        .as_array()
+        .unwrap()
+        .iter()
+        .all(|f| f["key"] == "author"));
 
     let keys = get(&h.app, "/api/v1/tags/keys").await.json();
     assert!(keys
@@ -1233,7 +1278,10 @@ async fn every_error_response_carries_a_correlatable_request_id() {
         let reply = get(&h.app, uri).await;
         assert!(reply.status.is_client_error(), "{uri}");
         let req_id = reply.req_id();
-        assert!(!req_id.is_empty() && req_id != "-", "{uri}: req_id={req_id:?}");
+        assert!(
+            !req_id.is_empty() && req_id != "-",
+            "{uri}: req_id={req_id:?}"
+        );
         // And the same id is on the response header, so a client can quote it.
         assert_eq!(
             reply.headers.get("x-request-id").unwrap().to_str().unwrap(),
@@ -1438,7 +1486,10 @@ async fn a_dead_database_is_a_500_not_an_empty_200() {
         assert_eq!(reply.error_code(), "DATABASE", "{uri}");
         // The driver's message — which can carry the host and DSN — must not be
         // echoed to the caller.
-        let message = reply.json()["error"]["message"].as_str().unwrap().to_string();
+        let message = reply.json()["error"]["message"]
+            .as_str()
+            .unwrap()
+            .to_string();
         assert_eq!(message, "database error");
         assert!(!message.contains("postgres://"));
     }

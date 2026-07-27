@@ -90,10 +90,7 @@ mod tests {
 
     #[test]
     fn mode_defaults_to_keyword_and_rejects_anything_else() {
-        assert_eq!(
-            SearchParams::default().mode().unwrap(),
-            SearchMode::Keyword
-        );
+        assert_eq!(SearchParams::default().mode().unwrap(), SearchMode::Keyword);
         for (raw, expected) in [
             ("keyword", SearchMode::Keyword),
             ("semantic", SearchMode::Semantic),
@@ -109,7 +106,11 @@ mod tests {
             mode: Some("vector".into()),
             ..Default::default()
         };
-        assert!(params.mode().unwrap_err().client_message().contains("hybrid"));
+        assert!(params
+            .mode()
+            .unwrap_err()
+            .client_message()
+            .contains("hybrid"));
     }
 
     #[test]

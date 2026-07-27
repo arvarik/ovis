@@ -393,7 +393,11 @@ pub async fn status_counts(pool: &PgPool) -> CoreResult<ConnectorStatusCounts> {
 }
 
 /// Leaderboard for `/stats/connectors/top`.
-pub async fn top_connectors(pool: &PgPool, by_recent: bool, limit: i64) -> CoreResult<Vec<TopConnector>> {
+pub async fn top_connectors(
+    pool: &PgPool,
+    by_recent: bool,
+    limit: i64,
+) -> CoreResult<Vec<TopConnector>> {
     let order = if by_recent {
         "cc.last_successful_index_time DESC NULLS LAST"
     } else {

@@ -92,7 +92,14 @@ async fn main() -> std::process::ExitCode {
     );
 
     // Say what the target actually is before measuring it.
-    match get_json(&client, &base, "/api/v1/system/health", args.token.as_deref()).await {
+    match get_json(
+        &client,
+        &base,
+        "/api/v1/system/health",
+        args.token.as_deref(),
+    )
+    .await
+    {
         Ok(health) => {
             println!(
                 "  target: status={} index={} schema_ok={}",
@@ -219,7 +226,10 @@ async fn build_gates(
     let encoded = urlencode(&document_id);
 
     // Walk cursors to a genuinely deep position.
-    let mut cursor = first["next_cursor"].as_str().unwrap_or_default().to_string();
+    let mut cursor = first["next_cursor"]
+        .as_str()
+        .unwrap_or_default()
+        .to_string();
     let mut depth = 50usize;
     for _ in 0..19 {
         if cursor.is_empty() {
@@ -458,7 +468,10 @@ mod tests {
     fn urlencoding_escapes_everything_a_document_id_can_contain() {
         let encoded = urlencode("https://example.com/a?b=1&c=2 d=café");
         for forbidden in ['/', ':', '?', '&', '=', ' '] {
-            assert!(!encoded.contains(forbidden), "{forbidden} survived encoding");
+            assert!(
+                !encoded.contains(forbidden),
+                "{forbidden} survived encoding"
+            );
         }
         assert!(encoded.contains("%2F"));
         assert!(encoded.contains("%3F"));

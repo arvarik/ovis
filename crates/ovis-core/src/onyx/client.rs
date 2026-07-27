@@ -80,11 +80,9 @@ impl OnyxClient {
             .pool_idle_timeout(Duration::from_secs(30))
             .pool_max_idle_per_host(4)
             .build()
-            .map_err(|e| {
-                CoreError::Onyx {
-                    status: 0,
-                    body: format!("cannot build Onyx client: {e}"),
-                }
+            .map_err(|e| CoreError::Onyx {
+                status: 0,
+                body: format!("cannot build Onyx client: {e}"),
             })?;
 
         Ok(Self {
@@ -105,14 +103,10 @@ impl OnyxClient {
     }
 
     async fn send(&self, req: reqwest::RequestBuilder, what: &str) -> CoreResult<Value> {
-        let response = self
-            .authed(req)
-            .send()
-            .await
-            .map_err(|e| CoreError::Onyx {
-                status: 0,
-                body: format!("{what}: {e}"),
-            })?;
+        let response = self.authed(req).send().await.map_err(|e| CoreError::Onyx {
+            status: 0,
+            body: format!("{what}: {e}"),
+        })?;
 
         let status = response.status().as_u16();
         let body = response.text().await.unwrap_or_default();
@@ -248,7 +242,11 @@ impl OnyxClient {
         self.put(
             &format!("/manage/admin/cc-pair/{cc_pair_id}/status"),
             &json!({ "status": status }),
-            if active { "resume cc-pair" } else { "pause cc-pair" },
+            if active {
+                "resume cc-pair"
+            } else {
+                "pause cc-pair"
+            },
         )
         .await
     }
@@ -310,11 +308,7 @@ impl OnyxClient {
     /// Delete an entire cc-pair and every document it owns. The name-confirmation
     /// guard lives at the HTTP layer; by the time this is called the caller has
     /// already matched it.
-    pub async fn delete_cc_pair(
-        &self,
-        connector_id: i32,
-        credential_id: i32,
-    ) -> CoreResult<Value> {
+    pub async fn delete_cc_pair(&self, connector_id: i32, credential_id: i32) -> CoreResult<Value> {
         self.post(
             "/manage/admin/deletion-attempt",
             &json!({ "connector_id": connector_id, "credential_id": credential_id }),
@@ -496,7 +490,10 @@ impl OnyxClient {
         if !(200..300).contains(&status) {
             return Err(CoreError::Onyx {
                 status,
-                body: format!("minting a personal access token failed: {}", truncate(&body, 400)),
+                body: format!(
+                    "minting a personal access token failed: {}",
+                    truncate(&body, 400)
+                ),
             });
         }
 
@@ -568,7 +565,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        client(&server).await.set_cc_pair_status(42, false).await.unwrap();
+        client(&server)
+            .await
+            .set_cc_pair_status(42, false)
+            .await
+            .unwrap();
 
         let server2 = MockServer::start().await;
         Mock::given(method("PUT"))
@@ -578,7 +579,11 @@ mod tests {
             .mount(&server2)
             .await;
 
-        client(&server2).await.set_cc_pair_status(42, true).await.unwrap();
+        client(&server2)
+            .await
+            .set_cc_pair_status(42, true)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -608,7 +613,11 @@ mod tests {
             .mount(&server)
             .await;
 
-        client(&server).await.rename_cc_pair(9, "a b/c").await.unwrap();
+        client(&server)
+            .await
+            .rename_cc_pair(9, "a b/c")
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -616,12 +625,18 @@ mod tests {
         let server = MockServer::start().await;
         Mock::given(method("PUT"))
             .and(path("/manage/admin/cc-pair/9/property"))
-            .and(body_json(json!({ "name": "refresh_frequency", "value": "2592000" })))
+            .and(body_json(
+                json!({ "name": "refresh_frequency", "value": "2592000" }),
+            ))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "success": true })))
             .mount(&server)
             .await;
 
-        client(&server).await.set_refresh_freq(9, 2_592_000).await.unwrap();
+        client(&server)
+            .await
+            .set_refresh_freq(9, 2_592_000)
+            .await
+            .unwrap();
     }
 
     #[tokio::test]
@@ -676,7 +691,10 @@ mod tests {
         let err = onyx.targeted_reindex(None, None).await.unwrap_err();
         assert!(matches!(err, CoreError::Invalid(_)));
 
-        let err = onyx.targeted_reindex(Some(&[]), Some(&[])).await.unwrap_err();
+        let err = onyx
+            .targeted_reindex(Some(&[]), Some(&[]))
+            .await
+            .unwrap_err();
         assert!(matches!(err, CoreError::Invalid(_)));
     }
 

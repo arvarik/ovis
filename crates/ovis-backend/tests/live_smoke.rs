@@ -57,7 +57,10 @@ async fn health_reports_every_dependency_and_a_real_index_name() {
     };
 
     let health = get(&base, "/api/v1/system/health").await;
-    assert_eq!(health["status"], "ok", "the deployment is degraded: {health}");
+    assert_eq!(
+        health["status"], "ok",
+        "the deployment is degraded: {health}"
+    );
     assert_eq!(health["postgres"]["status"], "ok");
     assert_eq!(health["opensearch"]["status"], "ok");
     assert_eq!(health["schema_ok"], true);
@@ -83,8 +86,15 @@ async fn the_default_listing_is_recent_populated_and_attributed() {
 
     let page = get(&base, "/api/v1/pages?limit=50").await;
     let items = page["items"].as_array().unwrap();
-    assert_eq!(items.len(), 50, "a 1.65M-document corpus should fill a page");
-    assert!(page["total"].as_i64().unwrap() > 1_000_000, "total looks wrong");
+    assert_eq!(
+        items.len(),
+        50,
+        "a 1.65M-document corpus should fill a page"
+    );
+    assert!(
+        page["total"].as_i64().unwrap() > 1_000_000,
+        "total looks wrong"
+    );
 
     // Newest first, for real data rather than a fixture.
     let timestamps: Vec<&str> = items
@@ -141,11 +151,10 @@ async fn cursor_paging_is_stable_over_live_data() {
         for item in page["items"].as_array().unwrap() {
             seen.push(item["id"].as_str().unwrap().to_string());
         }
-        let Some(cursor) = page["next_cursor"].as_str() else { break };
-        uri = format!(
-            "/api/v1/pages?limit=20&cursor={}",
-            urlencoding(cursor)
-        );
+        let Some(cursor) = page["next_cursor"].as_str() else {
+            break;
+        };
+        uri = format!("/api/v1/pages?limit=20&cursor={}", urlencoding(cursor));
     }
 
     assert_eq!(seen.len(), 100);
@@ -169,7 +178,11 @@ async fn connectors_show_the_real_paused_majority() {
 
     let connectors = get(&base, "/api/v1/connectors").await;
     let items = connectors.as_array().unwrap();
-    assert!(items.len() > 300, "expected ~332 cc-pairs, got {}", items.len());
+    assert!(
+        items.len() > 300,
+        "expected ~332 cc-pairs, got {}",
+        items.len()
+    );
 
     // The C5 regression, on real data: the old query hardcoded `disabled = false`,
     // so the PAUSED majority was invisible.
@@ -187,7 +200,10 @@ async fn connectors_show_the_real_paused_majority() {
         .map(|c| c["doc_count"].as_i64().unwrap_or(0))
         .max()
         .unwrap();
-    assert!(biggest > 10_000, "the largest connector reported {biggest} docs");
+    assert!(
+        biggest > 10_000,
+        "the largest connector reported {biggest} docs"
+    );
 }
 
 #[tokio::test]

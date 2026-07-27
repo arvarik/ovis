@@ -56,11 +56,7 @@ impl IndexCapabilities {
 }
 
 impl OsClient {
-    pub fn new(
-        base_url: &str,
-        username: Option<&str>,
-        password: Option<&str>,
-    ) -> CoreResult<Self> {
+    pub fn new(base_url: &str, username: Option<&str>, password: Option<&str>) -> CoreResult<Self> {
         let client = reqwest::Client::builder()
             // A hung OpenSearch node used to stall a request forever while
             // holding its Postgres pool slot. Now it fails in seconds.
@@ -160,7 +156,10 @@ impl OsClient {
             .await?;
 
         let total = response["hits"]["total"]["value"].as_i64().unwrap_or(0);
-        let hits = response["hits"]["hits"].as_array().cloned().unwrap_or_default();
+        let hits = response["hits"]["hits"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let items: Vec<ChunkItem> = hits.iter().map(parse_chunk).collect();
 
         // Only advertise a next page when this one was full.
@@ -424,7 +423,10 @@ impl OsClient {
 
     pub async fn cat_allocation(&self) -> CoreResult<Option<Value>> {
         let response = self
-            .get("_cat/allocation?format=json&bytes=b", "read disk allocation")
+            .get(
+                "_cat/allocation?format=json&bytes=b",
+                "read disk allocation",
+            )
             .await?;
         Ok(response.as_array().and_then(|a| a.first().cloned()))
     }
@@ -578,7 +580,9 @@ fn parse_chunk(hit: &Value) -> ChunkItem {
         content,
         blurb: source["blurb"].as_str().map(|s| s.to_string()),
         title: source["title"].as_str().map(|s| s.to_string()),
-        semantic_identifier: source["semantic_identifier"].as_str().map(|s| s.to_string()),
+        semantic_identifier: source["semantic_identifier"]
+            .as_str()
+            .map(|s| s.to_string()),
         source_type: source["source_type"].as_str().map(|s| s.to_string()),
         token_estimate,
         source_links: parse_source_links(&source["source_links"]),
@@ -810,7 +814,10 @@ mod tests {
             "highlight": { "content": ["a <em>match</em>", "another <em>match</em>"] }
         });
         let hit = parse_search_hit(&with_highlight).unwrap();
-        assert_eq!(hit.snippet.as_deref(), Some("a <em>match</em> … another <em>match</em>"));
+        assert_eq!(
+            hit.snippet.as_deref(),
+            Some("a <em>match</em> … another <em>match</em>")
+        );
         assert_eq!(hit.score, 12.5);
 
         let without = json!({
@@ -830,7 +837,8 @@ mod tests {
 
     #[test]
     fn vector_extraction_walks_dotted_paths() {
-        let source = json!({ "embeddings": { "full_embedding": [0.1, 0.2] }, "content_vector": [1.0] });
+        let source =
+            json!({ "embeddings": { "full_embedding": [0.1, 0.2] }, "content_vector": [1.0] });
         assert_eq!(
             extract_vector(&source, "embeddings.full_embedding"),
             Some(vec![0.1, 0.2])

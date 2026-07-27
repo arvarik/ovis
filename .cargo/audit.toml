@@ -22,9 +22,16 @@ ignore = [
     "RUSTSEC-2023-0071",
 ]
 
-# Unmaintained/unsound advisories are reported but do not fail the run. The two
-# currently outstanding — `paste` (unmaintained) and `lru` (unsound `IterMut`,
-# which OVIS never calls) — both come from `ratatui 0.26` in `ovis-cli`, and both
-# go away with the CLI redesign's move to a current ratatui. Neither is reachable
-# from the backend.
+# Unmaintained/unsound advisories are reported but do not fail the run. Two are
+# currently outstanding, both from `ratatui 0.29` in `ovis-cli` and neither
+# reachable from the backend:
+#
+#   `paste` (RUSTSEC-2024-0436, unmaintained) — a proc-macro, so it runs at
+#     compile time and ships no code. The CLI redesign's 0.26 -> 0.29 upgrade was
+#     expected to drop it; 0.29 still depends on it.
+#   `lru` (RUSTSEC-2026-0002, unsound `IterMut`) — `cargo audit` flags the
+#     lockfile entry, but `cargo deny`, which resolves features, does not see an
+#     affected version in the graph. OVIS never calls `IterMut`; the TUI's own
+#     cache is `tui::data::Lru`, written by hand precisely so this is not load
+#     bearing.
 informational_warnings = ["unmaintained", "unsound"]

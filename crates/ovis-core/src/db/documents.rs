@@ -89,11 +89,7 @@ impl DocumentFilter {
 /// the shape of the whole query. `d` must be aliased to `public.document`.
 ///
 /// Everything caller-supplied is bound, never interpolated.
-fn push_filters<'a>(
-    qb: &mut QueryBuilder<'a, Postgres>,
-    f: &DocumentFilter,
-    plan: &ConnectorPlan,
-) {
+fn push_filters<'a>(qb: &mut QueryBuilder<'a, Postgres>, f: &DocumentFilter, plan: &ConnectorPlan) {
     qb.push(" WHERE TRUE");
 
     if let Some(term) = &f.search {
@@ -739,11 +735,7 @@ impl DocumentUpdate {
 ///   the partial `ix_document_needs_sync` index. Writing it corrupts that
 ///   contract. (The `update_kg_entity_name_from_doc_trigger` trigger does fire
 ///   on `semantic_id` — that is Onyx's own bookkeeping and is fine.)
-pub async fn update_document(
-    pool: &PgPool,
-    id: &str,
-    update: &DocumentUpdate,
-) -> CoreResult<u64> {
+pub async fn update_document(pool: &PgPool, id: &str, update: &DocumentUpdate) -> CoreResult<u64> {
     let result = sqlx::query(
         "UPDATE public.document \
          SET semantic_id  = COALESCE($1::varchar, semantic_id), \
@@ -806,19 +798,18 @@ pub async fn delete_document_cascading(
     }
     tx.commit().await?;
 
-    let (chunks_deleted, index_cleanup_pending) =
-        match os.delete_document_chunks(index, id).await {
-            Ok(n) => (n, false),
-            Err(err) => {
-                tracing::warn!(
-                    document_id = %id,
-                    error = %err,
-                    "postgres delete committed but index cleanup failed; queueing for retry"
-                );
-                let _ = super::pending_deletes::enqueue(pool, id, &err.to_string()).await;
-                (0, true)
-            }
-        };
+    let (chunks_deleted, index_cleanup_pending) = match os.delete_document_chunks(index, id).await {
+        Ok(n) => (n, false),
+        Err(err) => {
+            tracing::warn!(
+                document_id = %id,
+                error = %err,
+                "postgres delete committed but index cleanup failed; queueing for retry"
+            );
+            let _ = super::pending_deletes::enqueue(pool, id, &err.to_string()).await;
+            (0, true)
+        }
+    };
 
     Ok(DeleteOutcome {
         pg_deleted: true,
@@ -1036,10 +1027,7 @@ mod tests {
 
     #[test]
     fn chunk_keyset_handles_the_null_tail_in_both_directions() {
-        for (sort, cmp) in [
-            (SortOrder::ChunksDesc, "<"),
-            (SortOrder::ChunksAsc, ">"),
-        ] {
+        for (sort, cmp) in [(SortOrder::ChunksDesc, "<"), (SortOrder::ChunksAsc, ">")] {
             let with_value = Cursor {
                 sort,
                 ts: None,
@@ -1140,7 +1128,10 @@ mod tests {
         let pos = |t: &str| names.iter().position(|n| *n == t).unwrap();
         assert!(pos("kg_relationship") < pos("kg_entity"));
         assert!(pos("kg_relationship_extraction_staging") < pos("kg_entity_extraction_staging"));
-        assert_eq!(*names.last().unwrap(), "document_by_connector_credential_pair");
+        assert_eq!(
+            *names.last().unwrap(),
+            "document_by_connector_credential_pair"
+        );
     }
 
     #[test]

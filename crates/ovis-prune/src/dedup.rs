@@ -1,5 +1,5 @@
-use std::collections::{HashMap, HashSet};
 use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 
 use crate::config::{MinHashConfig, PreferKeepPolicy};
 use crate::heuristics::{DocumentWithContent, PruneCandidate, PruneFlagReason};
@@ -80,13 +80,17 @@ impl MinHashDedupEngine {
         // Generate deterministic pseudo-random (a, b) coefficient pairs using LCG
         let mut seed: u64 = 0x4D696E4861736831; // "MinHash1"
         for _ in 0..num_perm {
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let mut a = seed;
             if a % 2 == 0 {
                 a = a.wrapping_add(1); // Ensure odd integer for coprimality with 2^64
             }
 
-            seed = seed.wrapping_mul(6364136223846793005).wrapping_add(1442695040888963407);
+            seed = seed
+                .wrapping_mul(6364136223846793005)
+                .wrapping_add(1442695040888963407);
             let b = seed;
 
             coeffs.push(HashCoeff { a, b });
@@ -107,7 +111,10 @@ impl MinHashDedupEngine {
         for shingle in shingles {
             let x = hash_shingle(shingle);
             for i in 0..num_perm {
-                let h = self.coeffs[i].a.wrapping_mul(x).wrapping_add(self.coeffs[i].b);
+                let h = self.coeffs[i]
+                    .a
+                    .wrapping_mul(x)
+                    .wrapping_add(self.coeffs[i].b);
                 if h < sig[i] {
                     sig[i] = h;
                 }
@@ -177,7 +184,11 @@ impl MinHashDedupEngine {
                     for j in (i + 1)..bucket_docs.len() {
                         let idx1 = bucket_docs[i];
                         let idx2 = bucket_docs[j];
-                        let pair = if idx1 < idx2 { (idx1, idx2) } else { (idx2, idx1) };
+                        let pair = if idx1 < idx2 {
+                            (idx1, idx2)
+                        } else {
+                            (idx2, idx1)
+                        };
                         candidate_pair_indices.insert(pair);
                     }
                 }
@@ -194,7 +205,8 @@ impl MinHashDedupEngine {
                 let doc1 = &docs[idx1];
                 let doc2 = &docs[idx2];
 
-                let (kept_doc, dup_doc, reason) = select_keep_document(doc1, doc2, prefer_keep, sim);
+                let (kept_doc, dup_doc, reason) =
+                    select_keep_document(doc1, doc2, prefer_keep, sim);
 
                 if !flagged_as_duplicate.contains(&dup_doc.id) {
                     flagged_as_duplicate.insert(dup_doc.id.clone());
@@ -241,13 +253,21 @@ fn select_keep_document<'a>(
                 (
                     doc1,
                     doc2,
-                    format!("Keep longest content ({} chars vs {} chars)", doc1.content.len(), doc2.content.len()),
+                    format!(
+                        "Keep longest content ({} chars vs {} chars)",
+                        doc1.content.len(),
+                        doc2.content.len()
+                    ),
                 )
             } else {
                 (
                     doc2,
                     doc1,
-                    format!("Keep longest content ({} chars vs {} chars)", doc2.content.len(), doc1.content.len()),
+                    format!(
+                        "Keep longest content ({} chars vs {} chars)",
+                        doc2.content.len(),
+                        doc1.content.len()
+                    ),
                 )
             }
         }

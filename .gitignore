@@ -67,6 +67,11 @@ ui/coverage
 *.log
 !ops/*.log
 
+# Obsidian's per-machine pane/tab state, which changes every time the vault is
+# opened. The shared vault settings (app/appearance/core-plugins) stay tracked.
+redesign/.obsidian/workspace.json
+redesign/.obsidian/workspace-mobile.json
+
 # ---------------------------------------------------------------------------
 # Editors and operating systems
 # ---------------------------------------------------------------------------

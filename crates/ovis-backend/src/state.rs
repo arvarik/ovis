@@ -307,9 +307,7 @@ mod tests {
             missing_columns: vec!["document.chunk_count".into()],
             ..Default::default()
         });
-        let err = meta
-            .requires_column("document", "chunk_count")
-            .unwrap_err();
+        let err = meta.requires_column("document", "chunk_count").unwrap_err();
         assert!(matches!(err, CoreError::SchemaMismatch(_)));
         assert!(err.to_string().contains("document.chunk_count"));
         assert!(meta.requires_column("document", "boost").is_ok());

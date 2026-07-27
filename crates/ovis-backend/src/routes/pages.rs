@@ -416,8 +416,11 @@ mod tests {
 
     #[test]
     fn chunks_include_parameter_only_accepts_the_documented_values() {
-        for (value, expected) in [(None, true), (Some("content"), true), (Some("meta_only"), false)]
-        {
+        for (value, expected) in [
+            (None, true),
+            (Some("content"), true),
+            (Some("meta_only"), false),
+        ] {
             let include = match value {
                 None | Some("content") => true,
                 Some("meta_only") => false,

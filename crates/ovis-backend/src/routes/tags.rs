@@ -44,11 +44,7 @@ pub async fn list(
     }
 
     let facets = Arc::new(ovis_core::db::tags::list_facets(&state.db, key, prefix, limit).await?);
-    state
-        .caches
-        .facets
-        .insert(cache_key, facets.clone())
-        .await;
+    state.caches.facets.insert(cache_key, facets.clone()).await;
 
     Ok(axum::Json(facets.as_ref().clone()).into_response())
 }

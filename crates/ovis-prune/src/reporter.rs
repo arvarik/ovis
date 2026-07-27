@@ -71,13 +71,18 @@ mod tests {
             }],
         };
 
-        let json_str = report.to_json_pretty().expect("Failed to serialize audit report");
+        let json_str = report
+            .to_json_pretty()
+            .expect("Failed to serialize audit report");
         assert!(json_str.contains("total_documents_evaluated"));
         assert!(json_str.contains("doc2"));
 
         let deserialized: PruneAuditReport =
             serde_json::from_str(&json_str).expect("Failed to deserialize audit report");
-        assert_eq!(report.total_documents_evaluated, deserialized.total_documents_evaluated);
+        assert_eq!(
+            report.total_documents_evaluated,
+            deserialized.total_documents_evaluated
+        );
         assert_eq!(report.candidates.len(), deserialized.candidates.len());
     }
 }

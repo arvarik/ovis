@@ -66,10 +66,16 @@ async fn chunk_fetch_excludes_vectors_and_tracks_the_real_total() {
         .await
         .unwrap();
 
-    assert_eq!(total, 42, "the chunk total must be the index's, not the page's");
+    assert_eq!(
+        total, 42,
+        "the chunk total must be the index's, not the page's"
+    );
     assert_eq!(items.len(), 1);
     assert_eq!(items[0].token_estimate, Some(3));
-    assert_eq!(items[0].source_links.as_ref().unwrap()["0"], "https://example.com/a");
+    assert_eq!(
+        items[0].source_links.as_ref().unwrap()["0"],
+        "https://example.com/a"
+    );
     assert_eq!(next_after, None, "a partial page has no next cursor");
 
     let body = captured_body(&server).await;
@@ -81,7 +87,10 @@ async fn chunk_fetch_excludes_vectors_and_tracks_the_real_total() {
         );
     }
     assert_eq!(body["track_total_hits"], true);
-    assert_eq!(body["query"]["term"]["document_id"], "https://example.com/a");
+    assert_eq!(
+        body["query"]["term"]["document_id"],
+        "https://example.com/a"
+    );
     assert!(
         !body.to_string().contains("document_id.keyword"),
         "document_id is already a keyword field"
@@ -235,7 +244,10 @@ async fn hybrid_search_sends_both_clauses_with_their_weights() {
     assert_eq!(should[0]["multi_match"]["boost"], 0.4);
     assert_eq!(should[1]["knn"]["embeddings.full_embedding"]["boost"], 0.6);
     // Postgres stores WEB; the index stores web.
-    assert_eq!(body["query"]["bool"]["filter"][0]["term"]["source_type"], "web");
+    assert_eq!(
+        body["query"]["bool"]["filter"][0]["term"]["source_type"],
+        "web"
+    );
 }
 
 #[tokio::test]
@@ -268,24 +280,39 @@ async fn batch_delete_uses_terms_and_sums_across_requests() {
         .mount(&server)
         .await;
 
-    let ids: Vec<String> = (0..600).map(|i| format!("https://example.com/{i}")).collect();
-    let deleted = client(&server).delete_chunks_for(INDEX, &ids).await.unwrap();
+    let ids: Vec<String> = (0..600)
+        .map(|i| format!("https://example.com/{i}"))
+        .collect();
+    let deleted = client(&server)
+        .delete_chunks_for(INDEX, &ids)
+        .await
+        .unwrap();
 
     // 600 ids ⇒ two requests of ≤500, and their counts add up.
     assert_eq!(deleted, 6);
     let requests = server.received_requests().await.unwrap();
-    assert_eq!(requests.len(), 2, "ids must be chunked, not sent in one body");
+    assert_eq!(
+        requests.len(),
+        2,
+        "ids must be chunked, not sent in one body"
+    );
     for request in &requests {
         let body: Value = serde_json::from_slice(&request.body).unwrap();
         let terms = body["query"]["terms"]["document_id"].as_array().unwrap();
-        assert!(terms.len() <= 500, "a terms clause exceeded the batch bound");
+        assert!(
+            terms.len() <= 500,
+            "a terms clause exceeded the batch bound"
+        );
     }
 }
 
 #[tokio::test]
 async fn an_empty_delete_makes_no_request_at_all() {
     let server = MockServer::start().await;
-    assert_eq!(client(&server).delete_chunks_for(INDEX, &[]).await.unwrap(), 0);
+    assert_eq!(
+        client(&server).delete_chunks_for(INDEX, &[]).await.unwrap(),
+        0
+    );
     assert!(server.received_requests().await.unwrap().is_empty());
 }
 
@@ -306,7 +333,10 @@ async fn chunk_counts_are_batched_into_one_aggregation_per_500_ids() {
     let counts = client(&server)
         .chunk_counts(
             INDEX,
-            &["https://example.com/a".into(), "https://example.com/b".into()],
+            &[
+                "https://example.com/a".into(),
+                "https://example.com/b".into(),
+            ],
         )
         .await
         .unwrap();
@@ -378,7 +408,9 @@ async fn a_chunk_vector_falls_back_to_search_when_the_deterministic_id_misses() 
 async fn a_chunk_with_no_stored_vector_reports_none_rather_than_inventing_one() {
     let server = MockServer::start().await;
     Mock::given(method("GET"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "found": true, "_source": {} })))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(json!({ "found": true, "_source": {} })),
+        )
         .mount(&server)
         .await;
     Mock::given(method("POST"))

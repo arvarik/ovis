@@ -300,7 +300,10 @@ mod tests {
             AppError::ParkedConnector("ack required".into()).status(),
             StatusCode::CONFLICT
         );
-        assert_eq!(AppError::Timeout("postgres").status(), StatusCode::GATEWAY_TIMEOUT);
+        assert_eq!(
+            AppError::Timeout("postgres").status(),
+            StatusCode::GATEWAY_TIMEOUT
+        );
     }
 
     #[test]

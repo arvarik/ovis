@@ -44,14 +44,20 @@ mod tests {
 
     #[tokio::test]
     async fn the_deferred_error_is_rendered_with_the_request_id() {
-        let handler_response = AppError::Database("password authentication failed".into())
-            .into_response();
+        let handler_response =
+            AppError::Database("password authentication failed".into()).into_response();
         // Before the layer runs, the body has the placeholder.
         let mut carried = handler_response;
-        let err = carried.extensions_mut().remove::<AppError>().expect("carried");
+        let err = carried
+            .extensions_mut()
+            .remove::<AppError>()
+            .expect("carried");
         let rendered = err.into_response_with_id("ms2djpd70071");
 
-        assert_eq!(rendered.status(), axum::http::StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(
+            rendered.status(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
         let body = body_json(rendered).await;
         assert_eq!(body["error"]["req_id"], "ms2djpd70071");
         assert_eq!(body["error"]["code"], "DATABASE");
@@ -63,8 +69,8 @@ mod tests {
 
     #[tokio::test]
     async fn a_successful_response_passes_through_untouched() {
-        let mut response = (axum::http::StatusCode::OK, Body::from("{\"ok\":true}"))
-            .into_response();
+        let mut response =
+            (axum::http::StatusCode::OK, Body::from("{\"ok\":true}")).into_response();
         assert!(response.extensions_mut().remove::<AppError>().is_none());
     }
 

@@ -51,7 +51,8 @@ fn default_title_blacklist_regex() -> Vec<String> {
         "(?i)^404 Not Found".to_string(),
         "(?i)^Access Denied".to_string(),
         "(?i)^Login \\| ".to_string(),
-        "(?i)(404 not found|access denied|login required|enable javascript|cookie policy)".to_string(),
+        "(?i)(404 not found|access denied|login required|enable javascript|cookie policy)"
+            .to_string(),
     ]
 }
 fn default_url_blacklist_patterns() -> Vec<String> {
@@ -254,7 +255,10 @@ mod tests {
         assert_eq!(config.deduplication.minhash.num_perm, 128);
         assert_eq!(config.deduplication.minhash.jaccard_threshold, 0.85);
         assert_eq!(config.deduplication.minhash.shingle_size, 5);
-        assert_eq!(config.deduplication.prefer_keep, PreferKeepPolicy::LongestContent);
+        assert_eq!(
+            config.deduplication.prefer_keep,
+            PreferKeepPolicy::LongestContent
+        );
         assert!(config.execution.dry_run);
         assert!(!config.execution.auto_delete);
     }
@@ -311,7 +315,10 @@ execution:
         assert_eq!(config.heuristics.url_blacklist_patterns.len(), 3);
         assert_eq!(config.deduplication.minhash.num_perm, 128);
         assert_eq!(config.deduplication.minhash.jaccard_threshold, 0.85);
-        assert_eq!(config.deduplication.prefer_keep, PreferKeepPolicy::LongestContent);
+        assert_eq!(
+            config.deduplication.prefer_keep,
+            PreferKeepPolicy::LongestContent
+        );
         assert!(!config.llm_relevance.enabled);
         assert!(config.execution.dry_run);
         assert_eq!(config.execution.audit_log_path, "./prune_audit_log.json");

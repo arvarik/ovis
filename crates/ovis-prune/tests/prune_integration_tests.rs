@@ -1,6 +1,4 @@
-use ovis_prune::{
-    DocumentWithContent, PreferKeepPolicy, PruneConfig, PruningEngine,
-};
+use ovis_prune::{DocumentWithContent, PreferKeepPolicy, PruneConfig, PruningEngine};
 use serde_json::json;
 
 fn make_doc(
@@ -104,7 +102,9 @@ execution:
         ),
     ];
 
-    let report = engine.evaluate_repository(&docs).expect("Evaluation failed");
+    let report = engine
+        .evaluate_repository(&docs)
+        .expect("Evaluation failed");
 
     assert_eq!(report.total_documents_evaluated, 6);
     assert!(report.total_candidates_flagged >= 4);
@@ -112,7 +112,9 @@ execution:
 
     // Save JSON audit report to test disk output
     let temp_log_path = "./target/test_prune_audit_log.json";
-    report.save_to_file(temp_log_path).expect("Failed to write audit log file");
+    report
+        .save_to_file(temp_log_path)
+        .expect("Failed to write audit log file");
     assert!(std::path::Path::new(temp_log_path).exists());
 
     // Read back log file and parse JSON
@@ -146,7 +148,10 @@ fn test_prefer_keep_policies_in_deduplication() {
     let mut config1 = PruneConfig::default();
     config1.deduplication.prefer_keep = PreferKeepPolicy::LongestContent;
     let engine1 = PruningEngine::new(config1).unwrap();
-    let (dups1, _) = engine1.evaluate_repository(&docs).map(|r| (r.duplicate_pairs, r.candidates)).unwrap();
+    let (dups1, _) = engine1
+        .evaluate_repository(&docs)
+        .map(|r| (r.duplicate_pairs, r.candidates))
+        .unwrap();
     if !dups1.is_empty() {
         assert_eq!(dups1[0].kept_document_id, "doc_b");
         assert_eq!(dups1[0].duplicate_document_id, "doc_a");
@@ -156,7 +161,10 @@ fn test_prefer_keep_policies_in_deduplication() {
     let mut config2 = PruneConfig::default();
     config2.deduplication.prefer_keep = PreferKeepPolicy::NewestUpdated;
     let engine2 = PruningEngine::new(config2).unwrap();
-    let (dups2, _) = engine2.evaluate_repository(&docs).map(|r| (r.duplicate_pairs, r.candidates)).unwrap();
+    let (dups2, _) = engine2
+        .evaluate_repository(&docs)
+        .map(|r| (r.duplicate_pairs, r.candidates))
+        .unwrap();
     if !dups2.is_empty() {
         assert_eq!(dups2[0].kept_document_id, "doc_b");
     }
@@ -165,7 +173,10 @@ fn test_prefer_keep_policies_in_deduplication() {
     let mut config3 = PruneConfig::default();
     config3.deduplication.prefer_keep = PreferKeepPolicy::ShortestUrl;
     let engine3 = PruningEngine::new(config3).unwrap();
-    let (dups3, _) = engine3.evaluate_repository(&docs).map(|r| (r.duplicate_pairs, r.candidates)).unwrap();
+    let (dups3, _) = engine3
+        .evaluate_repository(&docs)
+        .map(|r| (r.duplicate_pairs, r.candidates))
+        .unwrap();
     if !dups3.is_empty() {
         assert_eq!(dups3[0].kept_document_id, "doc_a");
         assert_eq!(dups3[0].duplicate_document_id, "doc_b");

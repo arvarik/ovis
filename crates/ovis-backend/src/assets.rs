@@ -45,7 +45,11 @@ pub async fn static_handler(uri: Uri) -> Response {
 
 fn respond(path: &str, body: Vec<u8>) -> Response {
     let mime = mime_guess::from_path(path).first_or_octet_stream();
-    let cache = if is_immutable(path) { IMMUTABLE } else { NO_CACHE };
+    let cache = if is_immutable(path) {
+        IMMUTABLE
+    } else {
+        NO_CACHE
+    };
 
     match Response::builder()
         .status(StatusCode::OK)

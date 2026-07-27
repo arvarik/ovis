@@ -33,7 +33,12 @@ const SEARCH_SOURCE_FIELDS: [&str; 7] = [
 /// `document_id` is a `keyword` field, so this is a plain `term` — no
 /// `.keyword` suffix and no `should` pair between the two spellings, which is
 /// what the old client did because it did not know the mapping.
-pub fn chunks_body(document_id: &str, after: Option<i64>, size: i64, include_content: bool) -> Value {
+pub fn chunks_body(
+    document_id: &str,
+    after: Option<i64>,
+    size: i64,
+    include_content: bool,
+) -> Value {
     let mut excludes: Vec<&str> = VECTOR_FIELDS.to_vec();
     if !include_content {
         excludes.extend_from_slice(&BULKY_TEXT_FIELDS);
@@ -99,7 +104,11 @@ pub fn update_title_body(document_id: &str, title: &str) -> Value {
 /// Propagate `hidden`/`boost` into the chunks of one document. Only used when no
 /// Onyx API key is configured — with a key, Onyx applies these and syncs its own
 /// index.
-pub fn update_flags_body(document_id: &str, hidden: Option<bool>, boost: Option<i32>) -> Option<Value> {
+pub fn update_flags_body(
+    document_id: &str,
+    hidden: Option<bool>,
+    boost: Option<i32>,
+) -> Option<Value> {
     let mut script = String::new();
     let mut params = serde_json::Map::new();
     if let Some(hidden) = hidden {
@@ -178,9 +187,9 @@ fn text_clause(query: &str, boost: Option<f64>) -> Value {
 /// best-matching chunk) rather than a wall of near-duplicate chunk hits.
 pub fn search_body(req: &SearchRequest) -> Value {
     let filters = filter_clauses(&req.filters);
-    let knn_clause = req.knn_field.as_ref().zip(req.vector.as_ref()).map(|(field, vector)| {
-        json!({ "knn": { field: { "vector": vector, "k": 50, "boost": 0.6 } } })
-    });
+    let knn_clause = req.knn_field.as_ref().zip(req.vector.as_ref()).map(
+        |(field, vector)| json!({ "knn": { field: { "vector": vector, "k": 50, "boost": 0.6 } } }),
+    );
 
     // Only a semantic request that *got* a usable kNN clause ends up with no text
     // clause. Everything else — including a semantic or hybrid request that had
@@ -263,7 +272,10 @@ mod tests {
     #[test]
     fn chunk_fetch_uses_a_plain_term_on_the_keyword_field() {
         let body = chunks_body("https://example.com/a", None, 100, true);
-        assert_eq!(body["query"]["term"]["document_id"], "https://example.com/a");
+        assert_eq!(
+            body["query"]["term"]["document_id"],
+            "https://example.com/a"
+        );
         let text = body.to_string();
         assert!(
             !text.contains("document_id.keyword"),
@@ -335,7 +347,10 @@ mod tests {
             knn_field: None,
         };
         let body = search_body(&req);
-        assert_eq!(body["query"]["bool"]["filter"][0]["term"]["source_type"], "web");
+        assert_eq!(
+            body["query"]["bool"]["filter"][0]["term"]["source_type"],
+            "web"
+        );
     }
 
     #[test]

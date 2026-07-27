@@ -116,9 +116,7 @@ pub async fn health(state: &AppState) -> HealthResponse {
     // What makes the service degraded: Postgres and OpenSearch are required, and
     // so is a schema we can actually answer from. An unconfigured or broken Onyx
     // or embedder costs specific features, not the service.
-    let degraded = postgres.status != "ok"
-        || opensearch.status != "ok"
-        || !runtime.schema.is_ok();
+    let degraded = postgres.status != "ok" || opensearch.status != "ok" || !runtime.schema.is_ok();
 
     HealthResponse {
         status: if degraded { "degraded" } else { "ok" }.into(),
@@ -164,11 +162,7 @@ mod tests {
     use super::*;
     use ovis_core::db::probe::SchemaProbe;
 
-    fn health_with(
-        postgres: &str,
-        opensearch: &str,
-        schema: SchemaProbe,
-    ) -> (bool, SchemaProbe) {
+    fn health_with(postgres: &str, opensearch: &str, schema: SchemaProbe) -> (bool, SchemaProbe) {
         let degraded = postgres != "ok" || opensearch != "ok" || !schema.is_ok();
         (degraded, schema)
     }

@@ -138,7 +138,12 @@ pub async fn stream(
         if let Ok(event) = Event::default().event("done").json_data(payload) {
             let _ = tx.send(Ok(event)).await;
         }
-        tracing::debug!(req_id, emitted, elapsed_ms = started.elapsed().as_millis() as u64, "stream completed");
+        tracing::debug!(
+            req_id,
+            emitted,
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "stream completed"
+        );
     });
 
     Ok(Sse::new(ReceiverStream::new(rx)).keep_alive(

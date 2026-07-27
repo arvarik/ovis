@@ -25,15 +25,53 @@ edit, which Onyx exposes no endpoint for.
 | Crate | What it is |
 |---|---|
 | `ovis-core` | The data plane: Onyx Postgres queries, the OpenSearch client, the Onyx API client, and the wire types shared with the CLI |
-| `ovis-backend` | The HTTP/SSE server and the embedded UI |
+| [`ovis-backend`](./crates/ovis-backend/README.md) | The HTTP/SSE server and the embedded UI |
 | `ovis-bench` | The performance acceptance gate |
-| `ovis-cli` | `ovis` — CLI and TUI (its own redesign is pending; see `redesign/cli/`) |
+| [`ovis-cli`](./crates/ovis-cli/README.md) | `ovis` — the CLI and TUI, an API client holding no credentials |
 | `ovis-prune` | Deduplication and pruning engine (unchanged by this redesign) |
 
-Full design documents live in [`redesign/`](./redesign/); `redesign/backend/` is
-what this implementation follows, and
-[`redesign/backend/05_AS_BUILT.md`](./redesign/backend/05_AS_BUILT.md) records
-where the shipped code deviates from that design and why.
+Full design documents live in [`redesign/`](./redesign/); `redesign/backend/` and
+`redesign/cli/` are what this implementation follows, and their
+`05_AS_BUILT.md` files
+([backend](./redesign/backend/05_AS_BUILT.md),
+[CLI](./redesign/cli/05_AS_BUILT.md)) record where the shipped code deviates from
+those designs and why.
+
+---
+
+## The CLI
+
+`ovis` speaks the HTTP API and holds no database or OpenSearch credentials — the
+backend is the only process with any. Point it somewhere with `--server`,
+`OVIS_SERVER`, or a config profile.
+
+```bash
+ovis status                                  # server + dependency health
+ovis p ls kant --sort chunks:desc            # aliases: page → p, list → ls
+ovis p view @2                               # @N handles refer to your last list
+ovis p text @2                               # full text through $PAGER
+ovis search kant --mode hybrid               # says so when it degrades to keyword
+ovis c ls --parked                           # connectors the resilience cron parked
+ovis connector run tildes                    # one cc-pair; there is no bulk trigger
+ovis tui                                     # pages / connectors / activity
+```
+
+Every global flag works anywhere on the line, including after a subcommand.
+Data goes to stdout and diagnostics to stderr, so `ovis page list -o json | jq .`
+is always clean. Exit codes are meaningful — 3 not-found, 10 confirmation
+required under `--no-input`, 11 partial failure, 12 server unreachable, 13
+degraded, 14 stale `@N` handle — and a failure is never an exit 0 with plausible
+output.
+
+```bash
+ovis config init                             # annotated ~/.config/ovis/config.toml
+ovis config show --origin                    # every value and where it came from
+ovis completions zsh > "${fpath[1]}/_ovis"   # completes connector names live
+ovis server start -d                         # this binary also hosts the backend
+ovis server setup-onyx-key                   # mints the Onyx token (see below)
+```
+
+Full details in [`crates/ovis-cli/README.md`](./crates/ovis-cli/README.md).
 
 ---
 
@@ -100,12 +138,14 @@ on basic access), and it is presented the same way — `Authorization: Bearer �
 To mint one:
 
 ```bash
-scripts/onyx-token.sh          # prompts for the Onyx admin password
+ovis server setup-onyx-key     # prompts, then writes it to the config file
+scripts/onyx-token.sh          # or the shell equivalent, printing ONYX_API_KEY=…
 ```
 
-It logs in, tries `POST /admin/api-key` first (in case the edition ever changes),
-falls back to `POST /user/pats`, and prints the `ONYX_API_KEY=…` line to paste into
-`.env`. **Onyx returns the raw token exactly once** — there is no way to read it
+Both log in, try `POST /admin/api-key` first (in case the edition ever changes),
+fall back to `POST /user/pats`, and end with a token. `ovis server setup-onyx-key`
+stores it under `[server]` in `~/.config/ovis/config.toml` at mode 0600;
+`scripts/onyx-token.sh` prints the `ONYX_API_KEY=…` line to paste into `.env`. **Onyx returns the raw token exactly once** — there is no way to read it
 back, only to revoke it and mint another. The password is read interactively, goes
 to curl through a 0600 temp file rather than argv (where `ps` could see it), and is
 never written anywhere.

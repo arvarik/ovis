@@ -60,10 +60,8 @@ pub fn app(state: AppState) -> Router {
             .allow_methods(Any)
             .allow_headers(Any),
         Some(origins) => {
-            let parsed: Vec<axum::http::HeaderValue> = origins
-                .iter()
-                .filter_map(|o| o.parse().ok())
-                .collect();
+            let parsed: Vec<axum::http::HeaderValue> =
+                origins.iter().filter_map(|o| o.parse().ok()).collect();
             CorsLayer::new()
                 .allow_origin(parsed)
                 .allow_methods([

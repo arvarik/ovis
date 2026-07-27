@@ -258,7 +258,10 @@ pub async fn probe_document_fk_children(pool: &PgPool) -> CoreResult<Vec<String>
 }
 
 async fn probe_indexes(pool: &PgPool) -> CoreResult<Vec<String>> {
-    let expected: Vec<String> = EXPECTED_OVIS_INDEXES.iter().map(|s| s.to_string()).collect();
+    let expected: Vec<String> = EXPECTED_OVIS_INDEXES
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
     let rows = sqlx::query(
         // An interrupted CREATE INDEX CONCURRENTLY leaves an invalid index
         // behind that the planner ignores, so `indisvalid` is part of "exists".
@@ -348,8 +351,7 @@ mod tests {
         // The delete sweep names tables directly; at minimum the ones that also
         // appear in read queries must be probed.
         assert!(REQUIRED_COLUMNS.contains(&("document__tag", "document_id")));
-        assert!(REQUIRED_COLUMNS
-            .contains(&("document_by_connector_credential_pair", "id")));
+        assert!(REQUIRED_COLUMNS.contains(&("document_by_connector_credential_pair", "id")));
     }
 
     #[test]
@@ -358,7 +360,10 @@ mod tests {
             missing_indexes: vec!["ix_ovis_document_updated".into()],
             ..Default::default()
         };
-        assert!(perf_only.is_ok(), "a missing index is a warning, not a fault");
+        assert!(
+            perf_only.is_ok(),
+            "a missing index is a warning, not a fault"
+        );
 
         let broken = SchemaProbe {
             missing_columns: vec!["document.chunk_count".into()],

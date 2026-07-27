@@ -1,6 +1,6 @@
+use crate::config::HeuristicsConfig;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use crate::config::HeuristicsConfig;
 
 /// Document content combined with metadata required for evaluation by the pruning pipeline.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -126,7 +126,10 @@ impl HeuristicEvaluator {
             if re.is_match(&doc.semantic_id) || re.is_match(&doc.content) {
                 reasons.push(PruneFlagReason {
                     rule_name: "title_blacklist_regex".to_string(),
-                    description: format!("Matched title/error boilerplate pattern: '{}'", pattern_str),
+                    description: format!(
+                        "Matched title/error boilerplate pattern: '{}'",
+                        pattern_str
+                    ),
                     confidence: 1.0,
                 });
                 break;
@@ -224,7 +227,9 @@ mod tests {
         let doc = make_doc("doc1", "Symbol Spam", None, symbol_spam);
         let reasons = evaluator.evaluate(&doc);
 
-        assert!(reasons.iter().any(|r| r.rule_name == "min_alphanumeric_ratio"));
+        assert!(reasons
+            .iter()
+            .any(|r| r.rule_name == "min_alphanumeric_ratio"));
     }
 
     #[test]
@@ -238,7 +243,9 @@ mod tests {
         );
         let reasons = evaluator.evaluate(&error_doc);
 
-        assert!(reasons.iter().any(|r| r.rule_name == "title_blacklist_regex"));
+        assert!(reasons
+            .iter()
+            .any(|r| r.rule_name == "title_blacklist_regex"));
     }
 
     #[test]
@@ -252,7 +259,9 @@ mod tests {
         );
         let reasons = evaluator.evaluate(&tag_doc);
 
-        assert!(reasons.iter().any(|r| r.rule_name == "url_blacklist_patterns"));
+        assert!(reasons
+            .iter()
+            .any(|r| r.rule_name == "url_blacklist_patterns"));
     }
 
     #[test]
@@ -267,6 +276,9 @@ mod tests {
         );
         let reasons = evaluator.evaluate(&valid_doc);
 
-        assert!(reasons.is_empty(), "Valid document should pass all heuristic checks");
+        assert!(
+            reasons.is_empty(),
+            "Valid document should pass all heuristic checks"
+        );
     }
 }

@@ -30,7 +30,9 @@ pub async fn list_facets(
         qb.push(" AND t.tag_value ILIKE ");
         qb.push_bind(format!("{}%", prefix.replace(['%', '_'], "")));
     }
-    qb.push(" GROUP BY t.tag_key, t.tag_value ORDER BY doc_count DESC, t.tag_key, t.tag_value LIMIT ");
+    qb.push(
+        " GROUP BY t.tag_key, t.tag_value ORDER BY doc_count DESC, t.tag_key, t.tag_value LIMIT ",
+    );
     qb.push_bind(limit);
 
     let rows = qb.build().fetch_all(pool).await?;

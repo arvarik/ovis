@@ -84,8 +84,7 @@ impl AttemptRow {
 
         // Heartbeat if we have one, otherwise the row's own update time.
         let liveness = self.last_heartbeat_time.unwrap_or(self.time_updated);
-        let stalled = running
-            && (now - liveness) > chrono::Duration::minutes(STALL_AFTER_MINUTES);
+        let stalled = running && (now - liveness) > chrono::Duration::minutes(STALL_AFTER_MINUTES);
 
         let pages_per_min = if running {
             self.time_started.and_then(|started| {
@@ -325,8 +324,7 @@ mod tests {
             from_beginning: false,
             poll_range_start: None,
             poll_range_end: None,
-            last_heartbeat_time: heartbeat_mins_ago
-                .map(|m| now - chrono::Duration::minutes(m)),
+            last_heartbeat_time: heartbeat_mins_ago.map(|m| now - chrono::Duration::minutes(m)),
             heartbeat_counter: 3,
             cancellation_requested: false,
             search_settings_id: Some(4),
@@ -359,10 +357,15 @@ mod tests {
         let now = Utc::now();
         let running = row("IN_PROGRESS", 1, Some(1)).into_item(now);
         // 240 docs over ~60 minutes.
-        let rate = running.pages_per_min.expect("running attempts report a rate");
+        let rate = running
+            .pages_per_min
+            .expect("running attempts report a rate");
         assert!((rate - 4.0).abs() < 0.5, "unexpected rate {rate}");
 
-        assert!(row("SUCCESS", 1, None).into_item(now).pages_per_min.is_none());
+        assert!(row("SUCCESS", 1, None)
+            .into_item(now)
+            .pages_per_min
+            .is_none());
     }
 
     #[test]

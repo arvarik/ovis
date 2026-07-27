@@ -55,10 +55,7 @@ pub async fn search(state: &AppState, query: SearchQuery) -> Result<SearchRespon
             // 1 ms, which reads as "nothing matched" rather than "not supported".
             degraded = Some("no_knn_field".into());
         } else if let Some(embedder) = state.embed.as_ref() {
-            match embedder
-                .embed_query(&runtime.query_prefix, &query.q)
-                .await
-            {
+            match embedder.embed_query(&runtime.query_prefix, &query.q).await {
                 Ok(v) if v.len() as u32 == runtime.embedding_dim => vector = Some(v),
                 Ok(v) => {
                     tracing::warn!(

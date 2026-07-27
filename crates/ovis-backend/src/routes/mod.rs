@@ -55,9 +55,7 @@ pub fn api_router(state: AppState) -> Router {
         .route("/pages/{id}/text", get(pages::text))
         .route(
             "/pages/{id}",
-            get(pages::detail)
-                .patch(pages::patch)
-                .delete(pages::delete),
+            get(pages::detail).patch(pages::patch).delete(pages::delete),
         )
         // --- search ---
         .route("/search", get(search::search))

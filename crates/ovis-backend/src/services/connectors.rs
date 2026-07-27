@@ -14,7 +14,10 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 pub async fn summaries(state: &AppState) -> Result<Vec<ConnectorSummary>, AppError> {
-    Ok(super::pages::cached_connectors(state).await?.as_ref().clone())
+    Ok(super::pages::cached_connectors(state)
+        .await?
+        .as_ref()
+        .clone())
 }
 
 pub async fn detail(
@@ -103,8 +106,12 @@ pub async fn run_once(
         )));
     }
 
-    onyx.run_once(pair.connector_id, pair.credential_id, request.from_beginning)
-        .await?;
+    onyx.run_once(
+        pair.connector_id,
+        pair.credential_id,
+        request.from_beginning,
+    )
+    .await?;
     state.caches.invalidate_connector_scoped().await;
 
     tracing::info!(
