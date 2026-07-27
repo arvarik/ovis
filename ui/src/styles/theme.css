@@ -1,0 +1,250 @@
+/* Obsidian Atelier — the OVIS design system (redesign/frontend/01_DESIGN_SYSTEM.md).
+ *
+ * Single source of truth for color. The default Tailwind palette is wiped
+ * (--color-*: initial) so a stray `bg-gray-800` produces no CSS at all;
+ * every color a component can say is named here, by role.
+ */
+@import 'tailwindcss';
+
+/* Hover-reveal is gated on hover-capable devices; touch always sees actions. */
+@custom-variant hover-capable (@media (hover: hover));
+
+@theme {
+  --color-*: initial;
+
+  /* Canvas & surfaces */
+  --color-canvas: #05140c;
+  --color-surface: #0a1f13;
+  --color-surface-2: #0c2417;
+  --color-well: #071a0f;
+
+  /* Border/hover ladder */
+  --color-line: #143322;
+  --color-line-2: #1c4730;
+  --color-line-3: #1e4d34;
+  --color-hover: #112a1b;
+  --color-active: #123621;
+
+  /* Text */
+  --color-ink: #ecfdf5;
+  --color-ink-mute: #9bc4ad;
+  /* One step up from the spec's #5E8570: 4.5:1+ on every surface (axe). */
+  --color-ink-faint: #6b9480;
+
+  /* Accents, named by role */
+  --color-gold: #f59e0b;
+  --color-gold-bright: #fcd34d;
+  --color-mint: #10b981;
+  --color-rose: #fb7185;
+  --color-indigo: #818cf8;
+  --color-violet: #a78bfa;
+  --color-teal: #2dd4bf;
+
+  --color-black: #000000;
+  --color-white: #ffffff;
+
+  /* Typography */
+  --font-display: 'Fraunces Variable', Georgia, 'Times New Roman', serif;
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* Semantic type scale (mobile-first; 16px floor for inputs kills iOS zoom) */
+  --text-display-xl: 2.25rem;
+  --text-display-xl--line-height: 1.1;
+  --text-display: 1.75rem;
+  --text-display--line-height: 1.15;
+  --text-title: 1.125rem;
+  --text-title--line-height: 1.3;
+  --text-body: 0.9375rem;
+  --text-body--line-height: 1.5;
+  --text-label: 0.8125rem;
+  --text-label--line-height: 1.35;
+  --text-label--letter-spacing: 0.01em;
+  --text-caption: 0.75rem;
+  --text-caption--line-height: 1.35;
+  --text-mono-sm: 0.8125rem;
+  --text-mono-sm--line-height: 1.45;
+
+  /* Radius scale (codified) */
+  --radius-lg: 10px;
+  --radius-xl: 14px;
+  --radius-2xl: 20px;
+
+  /* Motion */
+  --ease-swift: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --animate-fade-in: fade-in var(--dur-fast) var(--ease-swift) both;
+  --animate-fade-up: fade-up var(--dur-base) var(--ease-swift) both;
+  --animate-scale-in: scale-in var(--dur-fast) var(--ease-swift) both;
+  --animate-slide-up: slide-up var(--dur-base) var(--ease-swift) both;
+  --animate-pulse-dot: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes fade-up {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes slide-up {
+    from {
+      opacity: 0;
+      transform: translateY(16px);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  @keyframes pulse-dot {
+    50% {
+      opacity: 0.4;
+    }
+  }
+}
+
+:root {
+  color-scheme: dark;
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur-fast: 0ms;
+    --dur-base: 0ms;
+    --dur-slow: 0ms;
+  }
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  ::view-transition-group(*),
+  ::view-transition-old(*),
+  ::view-transition-new(*) {
+    animation: none !important;
+  }
+}
+
+/* Route morphs stay quick and decisive. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation-duration: 160ms;
+}
+
+@layer base {
+  html {
+    background: var(--color-canvas);
+  }
+
+  body {
+    @apply bg-canvas text-ink font-sans text-body antialiased;
+    overscroll-behavior-y: none;
+  }
+
+  /* Focus is part of the aesthetic, not an afterthought. */
+  :focus-visible {
+    outline: 2px solid --alpha(var(--color-gold) / 70%);
+    outline-offset: 2px;
+  }
+
+  ::selection {
+    background: --alpha(var(--color-gold) / 30%);
+    color: var(--color-ink);
+  }
+
+  button,
+  a,
+  [role='button'] {
+    touch-action: manipulation;
+  }
+
+  /* Thin overlay scrollbars against the dark canvas. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--color-line-3) transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-line-3);
+    border-radius: 8px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+/* Level-2 overlay surface: deep glass. */
+@utility glass-panel {
+  background: --alpha(var(--color-surface-2) / 90%);
+  backdrop-filter: blur(24px);
+  -webkit-backdrop-filter: blur(24px);
+  border: 1px solid var(--color-line-2);
+  box-shadow: 0 25px 50px -12px --alpha(var(--color-black) / 40%);
+}
+
+/* The floating pill (search bar, chips bar). */
+@utility glass-pill {
+  background: --alpha(var(--color-surface) / 80%);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--color-line);
+}
+
+/* Subtle grain over the canvas — feTurbulence data-URI at ~2.5% opacity. */
+@utility bg-noise {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.025'/%3E%3C/svg%3E");
+}
+
+/* Fixed radial aurora wash behind the app shell. */
+@utility bg-aurora {
+  background-image:
+    radial-gradient(60rem 40rem at 0% 0%, --alpha(var(--color-mint) / 8%), transparent 60%),
+    radial-gradient(50rem 36rem at 100% 100%, --alpha(var(--color-gold) / 4%), transparent 60%);
+  background-attachment: fixed;
+}
+
+/* Serif numerals for stat tiles — Fraunces with tabular figures. */
+@utility stat-numeral {
+  font-family: var(--font-display);
+  font-variation-settings:
+    'SOFT' 40,
+    'WONK' 0;
+  font-variant-numeric: tabular-nums;
+}
+
+@utility font-display-soft {
+  font-variation-settings:
+    'SOFT' 40,
+    'WONK' 0;
+  font-feature-settings: 'ss01';
+}

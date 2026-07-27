@@ -29,13 +29,15 @@ edit, which Onyx exposes no endpoint for.
 | `ovis-bench` | The performance acceptance gate |
 | [`ovis-cli`](./crates/ovis-cli/README.md) | `ovis` — the CLI and TUI, an API client holding no credentials |
 | `ovis-prune` | Deduplication and pruning engine (unchanged by this redesign) |
+| [`ui/`](./ui/README.md) | The React web UI, compiled by Vite and embedded into the backend binary |
 
-Full design documents live in [`redesign/`](./redesign/); `redesign/backend/` and
-`redesign/cli/` are what this implementation follows, and their
+Full design documents live in [`redesign/`](./redesign/); the backend, CLI and
+frontend tracks are what this implementation follows, and their
 `05_AS_BUILT.md` files
 ([backend](./redesign/backend/05_AS_BUILT.md),
-[CLI](./redesign/cli/05_AS_BUILT.md)) record where the shipped code deviates from
-those designs and why.
+[CLI](./redesign/cli/05_AS_BUILT.md),
+[frontend](./redesign/frontend/05_AS_BUILT.md)) record where the shipped code
+deviates from those designs and why.
 
 ---
 
@@ -75,6 +77,38 @@ Full details in [`crates/ovis-cli/README.md`](./crates/ovis-cli/README.md).
 
 ---
 
+## The web UI
+
+The dashboard at `/` is a React app served from inside the binary — mobile-first,
+one component tree, keyboard-driven (`⌘K` palette, `?` shows every binding).
+Five views:
+
+- **Pages** — browse/filter/sort the full corpus over keyset cursors (no depth
+  limit), server-side presets with globally true counts, content search with the
+  degradation chip when semantic/hybrid falls back, an optional SSE live mode
+  that says so when the server caps the stream.
+- **Page inspector** — overview, reconstructed text (markdown-aware), chunks
+  with one *real* stored vector on demand, raw JSON; edit (title/boost/hidden)
+  and delete with consequences spelled out and hide-instead offered.
+- **Connectors** — the 332-cc-pair health matrix with true statuses, park
+  sentinels, pause/resume/run-once (the parked guard asks before overriding),
+  rename, and type-the-name delete.
+- **Activity** — live index attempts with heartbeats, batch progress and
+  pages/min; queued is labeled queued, `stalled` comes only from the backend's
+  heartbeat heuristic.
+- **Stats** — corpus totals, crawl timeline, sources, attempt outcomes, disk
+  gauge with the read-only alarm state.
+
+The API's honest fields render as-is: `chunk_count: null` is "not counted yet"
+(never 0), estimates carry a `~`, `recrawl_risk` warns before a delete, and a
+failed request is an error state with a retry — never an empty list posing as
+success. Design and deviations:
+[`redesign/frontend/`](./redesign/frontend/) and its
+[`05_AS_BUILT.md`](./redesign/frontend/05_AS_BUILT.md); developer workflow in
+[`ui/README.md`](./ui/README.md).
+
+---
+
 ## Running it
 
 ```bash
@@ -86,10 +120,15 @@ curl -fsS localhost:8080/api/v1/system/health | jq
 Or directly:
 
 ```bash
+(cd ui && npm install && npm run build)   # rust-embed compiles ui/dist into the binary
 export DATABASE_URL='postgres://postgres:…@192.168.4.113:5433/postgres'
 export OPENSEARCH_URL='http://192.168.4.113:9200'
 cargo run --release --bin ovis-backend
 ```
+
+(The Docker build runs the UI stage itself; only from-source builds need the
+`npm run build` first. Without it the server still runs — the API is complete
+and `/` answers "UI assets are not embedded in this build".)
 
 Configuration comes from the environment, optionally layered over a TOML file
 (`--config ovis.toml` or `OVIS_CONFIG`), with the environment winning. Every
@@ -320,14 +359,6 @@ legitimately show no results for a broad query. The response says
 `degraded: "connector_filter_post_applied"` and marks `total_hits_exact: false`
 rather than reporting a total that does not match the list.
 
-**The embedded UI has not been migrated yet.** The backend API changed shape, and
-`ui/` still reads `total_pages` (gone), `doc_updated_at` (now null for all but
-~1,500 of 1.65 M rows — use `updated_at`), and `full_text`/`embeddings` off the
-detail response (now separate endpoints). So the browser dashboard at `/` is
-currently broken; the API underneath it is not. The frontend is its own track —
-see `redesign/frontend/` — and the backend was deliberately given no compatibility
-shims, since the plan has the UI and CLI migrating in lockstep.
-
 **Deep offset paging is refused past 50,000 rows** (`400`, pointing at
 `next_cursor`). Keyset cursors have no depth limit.
 
@@ -363,11 +394,14 @@ unfiltered. The details, with the measurements behind the threshold, are in
   will be re-crawled at the next refresh. Every delete surface reports
   `recrawl_risk`.
 
-### Outstanding chore, independent of OVIS
+### Credential hygiene
 
-The Postgres password is committed in the proxmox-setup worker compose files, and
-was baked into pre-redesign OVIS binaries. It is worth rotating. Nothing in this
-repository contains it any more:
+The Postgres password was **rotated on 2026-07-26** (details in
+[`redesign/backend/05_AS_BUILT.md`](./redesign/backend/05_AS_BUILT.md) §5): the
+old value is rejected on both ports, every consumer was updated and restarted,
+and the proxmox-setup working files now read `${POSTGRES_PASSWORD}` instead of a
+literal. The retired value survives only in that other repository's git history,
+which the rotation defuses. Nothing in this repository contains any credential:
 
 ```bash
 grep -rnE '192\.168\.|postgres://[^ ]*:[^ @]*@' --include='*.rs' --include='*.toml' crates/

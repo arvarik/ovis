@@ -1,0 +1,17 @@
+{
+  "name": "Ovis",
+  "short_name": "Ovis",
+  "description": "Onyx visibility — browse, search, and operate the crawl corpus",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#05140C",
+  "theme_color": "#05140C",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

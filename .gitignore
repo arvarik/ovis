@@ -46,14 +46,13 @@ service-account*.json
 *.pdb
 
 ui/node_modules
-# The built UI is embedded by rust-embed at compile time, so it is a build
-# artifact and not tracked — but the directory and a placeholder index.html are,
-# so a fresh clone compiles before anyone has run `npm run build`.
-ui/dist/*
-!ui/dist/.gitkeep
-!ui/dist/index.html
+# The built UI is a build artifact: `vite build` wipes and rewrites ui/dist,
+# and ovis-backend's build.rs creates the (possibly empty) folder for
+# rust-embed — so nothing under it is tracked, not even a placeholder.
+ui/dist/
 ui/.vite
 ui/coverage
+ui/scripts/shots/
 
 # ---------------------------------------------------------------------------
 # Agent and tooling scratch
@@ -66,6 +65,11 @@ ui/coverage
 .claude/
 *.log
 !ops/*.log
+
+# Pre-redesign design documents. Superseded by redesign/ in full; kept locally
+# for archaeology, never pushed. (Also purged from git history before the
+# remote existed.)
+implementation/
 
 # Obsidian's per-machine pane/tab state, which changes every time the vault is
 # opened. The shared vault settings (app/appearance/core-plugins) stay tracked.
@@ -98,3 +102,7 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+
+# The original kickoff request — same class as implementation/: kept locally,
+# never pushed (purged from history alongside it).
+ORIGINAL_REQUEST.md

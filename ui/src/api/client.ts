@@ -1,80 +1,157 @@
-import {
-  ListPagesResponse,
-  PageDetailResponse,
-  DeletePageResponse,
-  BatchDeleteResponse,
-  ConnectorSummary,
-} from './types';
+/**
+ * Typed fetch wrapper for the OVIS API.
+ *
+ * - Base path `/api/v1` (dev-proxied to :8080, same-origin in production).
+ * - Every non-2xx carries the error envelope `{ error: { code, message,
+ *   status, req_id } }` — surfaced as a typed `ApiError`, never swallowed.
+ * - Document ids are URLs and must occupy exactly one percent-encoded path
+ *   segment: always route them through `encodeDocId`.
+ */
+import type { ApiErrorBody, HealthResponse } from './types';
 
-const API_BASE = '/api/v1';
+const BASE = '/api/v1';
+const TOKEN_KEY = 'ovis:token';
 
-export async function fetchPages(params: {
-  page?: number;
-  limit?: number;
-  search?: string;
-  connector_id?: number | null;
-  source?: string | null;
-}): Promise<ListPagesResponse> {
-  const queryParams = new URLSearchParams();
-  if (params.page) queryParams.set('page', params.page.toString());
-  if (params.limit) queryParams.set('limit', params.limit.toString());
-  if (params.search && params.search.trim()) queryParams.set('search', params.search.trim());
-  if (params.connector_id != null) queryParams.set('connector_id', params.connector_id.toString());
-  if (params.source) queryParams.set('source', params.source);
+export class ApiError extends Error {
+  readonly code: string;
+  readonly status: number;
+  readonly reqId: string | null;
 
-  const res = await fetch(`${API_BASE}/pages?${queryParams.toString()}`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch pages: ${res.statusText}`);
+  constructor(code: string, message: string, status: number, reqId: string | null) {
+    super(message);
+    this.name = 'ApiError';
+    this.code = code;
+    this.status = status;
+    this.reqId = reqId;
   }
-  return res.json();
 }
 
-export async function fetchPageDetail(id: string): Promise<PageDetailResponse> {
-  // Encode ID properly for path parameter
-  const encodedId = encodeURIComponent(id);
-  const res = await fetch(`${API_BASE}/pages/${encodedId}`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch page detail for ${id}: ${res.statusText}`);
-  }
-  return res.json();
-}
-
-export async function deletePage(id: string): Promise<DeletePageResponse> {
-  const encodedId = encodeURIComponent(id);
-  const res = await fetch(`${API_BASE}/pages/${encodedId}`, {
-    method: 'DELETE',
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to delete page ${id}: ${res.statusText}`);
-  }
-  return res.json();
-}
-
-export async function batchDeletePages(ids: string[]): Promise<BatchDeleteResponse> {
-  const res = await fetch(`${API_BASE}/pages/batch-delete`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ document_ids: ids }),
-  });
-  if (!res.ok) {
-    throw new Error(`Failed to batch delete pages: ${res.statusText}`);
-  }
-  return res.json();
-}
-
-export async function fetchConnectors(): Promise<ConnectorSummary[]> {
-  const res = await fetch(`${API_BASE}/connectors`);
-  if (!res.ok) {
-    throw new Error(`Failed to fetch connectors: ${res.statusText}`);
-  }
-  return res.json();
-}
-
-export async function checkBackendHealth(): Promise<boolean> {
+export function getToken(): string | null {
   try {
-    const res = await fetch(`${API_BASE}/health`, { method: 'GET' });
-    return res.ok;
+    return localStorage.getItem(TOKEN_KEY);
   } catch {
-    return false;
+    return null;
   }
 }
+
+export function setToken(token: string | null): void {
+  try {
+    if (token === null) localStorage.removeItem(TOKEN_KEY);
+    else localStorage.setItem(TOKEN_KEY, token);
+  } catch {
+    // Private-mode storage failure: the token just won't persist.
+  }
+}
+
+/**
+ * A document id is one percent-encoded path segment. `encodeURIComponent`
+ * encodes `/`, `?`, `#` and `%` — the characters that would otherwise split
+ * the segment or truncate the request.
+ */
+export function encodeDocId(id: string): string {
+  return encodeURIComponent(id);
+}
+
+export type QueryParams = Record<string, string | number | boolean | undefined | null>;
+
+function buildQuery(query?: QueryParams): string {
+  if (!query) return '';
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value === undefined || value === null) continue;
+    params.set(key, String(value));
+  }
+  const s = params.toString();
+  return s ? `?${s}` : '';
+}
+
+function baseHeaders(withJson: boolean): Record<string, string> {
+  const h: Record<string, string> = {};
+  if (withJson) h['Content-Type'] = 'application/json';
+  const token = getToken();
+  if (token) h['Authorization'] = `Bearer ${token}`;
+  return h;
+}
+
+async function toApiError(res: Response): Promise<ApiError> {
+  try {
+    const body = (await res.json()) as ApiErrorBody;
+    if (body && typeof body === 'object' && body.error && typeof body.error.code === 'string') {
+      return new ApiError(body.error.code, body.error.message, res.status, body.error.req_id);
+    }
+  } catch {
+    // fall through — not the envelope
+  }
+  return new ApiError(`HTTP_${res.status}`, `request failed with HTTP ${res.status}`, res.status, null);
+}
+
+interface RequestOptions {
+  query?: QueryParams;
+  body?: unknown;
+  signal?: AbortSignal;
+}
+
+async function request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
+  const res = await fetch(BASE + path + buildQuery(opts.query), {
+    method,
+    headers: baseHeaders(opts.body !== undefined),
+    body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    signal: opts.signal ?? null,
+  });
+  if (!res.ok) throw await toApiError(res);
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  get<T>(path: string, query?: QueryParams, signal?: AbortSignal): Promise<T> {
+    return request<T>('GET', path, { query, signal });
+  },
+
+  async getText(path: string, query?: QueryParams, signal?: AbortSignal): Promise<string> {
+    const res = await fetch(BASE + path + buildQuery(query), {
+      headers: baseHeaders(false),
+      signal: signal ?? null,
+    });
+    if (!res.ok) throw await toApiError(res);
+    return res.text();
+  },
+
+  post<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return request<T>('POST', path, { body: body ?? {}, signal });
+  },
+
+  patch<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
+    return request<T>('PATCH', path, { body, signal });
+  },
+
+  delete<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return request<T>('DELETE', path, { body, signal });
+  },
+
+  /**
+   * `/system/health` answers 503 when any dependency is degraded — but the
+   * body is still a full HealthResponse. Parse it either way; only a
+   * non-health-shaped body is an error.
+   */
+  async health(signal?: AbortSignal): Promise<HealthResponse> {
+    const res = await fetch(`${BASE}/system/health`, {
+      headers: baseHeaders(false),
+      signal: signal ?? null,
+    });
+    let body: unknown;
+    try {
+      body = await res.json();
+    } catch {
+      throw new ApiError(`HTTP_${res.status}`, `health check failed with HTTP ${res.status}`, res.status, null);
+    }
+    if (body && typeof body === 'object' && 'status' in body && 'postgres' in body) {
+      return body as HealthResponse;
+    }
+    const envelope = body as ApiErrorBody;
+    if (envelope?.error?.code) {
+      throw new ApiError(envelope.error.code, envelope.error.message, res.status, envelope.error.req_id);
+    }
+    throw new ApiError(`HTTP_${res.status}`, `health check failed with HTTP ${res.status}`, res.status, null);
+  },
+};

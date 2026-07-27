@@ -6,7 +6,11 @@
 use std::process::Command;
 
 fn main() {
-    // rust-embed reads ../../ui/dist at compile time; rebuild when it changes.
+    // rust-embed reads ../../ui/dist at compile time and fails the build if the
+    // folder is absent. It is a build artifact (untracked; `vite build` wipes
+    // it), so guarantee it exists — a fresh clone then compiles before anyone
+    // has run `npm run build`, serving "UI assets are not embedded" until then.
+    let _ = std::fs::create_dir_all("../../ui/dist");
     println!("cargo:rerun-if-changed=../../ui/dist");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=OVIS_GIT_SHA");
