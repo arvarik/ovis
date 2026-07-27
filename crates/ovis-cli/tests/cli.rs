@@ -528,11 +528,57 @@ fn no_compiled_in_credential_survives_in_the_binary() {
 }
 
 #[test]
-fn prune_says_it_is_deferred_rather_than_pretending_to_work() {
+fn prune_requires_a_subcommand_and_a_scan_scope() {
     let run = Run::new("http://127.0.0.1:1");
+    // Bare `ovis prune` shows the verb list (the house convention: help on a
+    // missing subcommand is exit 0), and it is a real command tree now.
     let output = run.cmd(&["prune"]);
-    assert_eq!(code(&output), 2);
-    assert!(stderr(&output).contains("deferred"), "{}", stderr(&output));
+    assert_eq!(code(&output), 0);
+    // clap routes missing-subcommand help through the error path: stderr.
+    let help = format!("{}{}", stdout(&output), stderr(&output));
+    for verb in ["scan", "staged", "restore", "delete", "status", "log"] {
+        assert!(help.contains(verb), "missing verb {verb}: {help}");
+    }
+    assert!(
+        !help.contains("deferred"),
+        "the deferred stub must be gone: {help}"
+    );
+
+    // A scan must say what to scan; detectors are mandatory.
+    let output = run.cmd(&["prune", "scan", "-d", "thin"]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(stderr(&output).contains("--all"), "{}", stderr(&output));
+}
+
+#[test]
+fn prune_delete_has_no_now_flag_by_grammar() {
+    // The lifecycle's core promise: nothing deletes inline. `--now` must not
+    // even parse.
+    let run = Run::new("http://127.0.0.1:1");
+    let output = run.cmd(&["prune", "delete", "@1", "--now"]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(
+        stderr(&output).contains("--now"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn prune_status_reports_an_unreachable_server_as_exit_12() {
+    let run = Run::new("http://127.0.0.1:1");
+    let output = run.cmd(&["prune", "status"]);
+    assert_eq!(code(&output), 12, "{}", stderr(&output));
+}
+
+#[test]
+fn prune_stage_refuses_without_ids_or_filter_before_any_request() {
+    // Usage validation happens before the network: the server here is
+    // unreachable, so exit 2 (not 12) proves the order.
+    let run = Run::new("http://127.0.0.1:1");
+    let output = run.cmd(&["prune", "stage"]);
+    assert_eq!(code(&output), 2, "{}", stderr(&output));
+    assert!(stderr(&output).contains("--filter"), "{}", stderr(&output));
 }
 
 #[test]

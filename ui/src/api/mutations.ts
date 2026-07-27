@@ -13,6 +13,12 @@ import { toast } from 'sonner';
 import { api, encodeDocId, ApiError } from './client';
 import type {
   ActionResponse,
+  PruneBulkResponse,
+  PruneRuleItem,
+  PruneRulePreviewResponse,
+  PruneScanItem,
+  PruneScanRequest,
+  PruneSelector,
   BatchDeleteResponse,
   ConnectorPatchRequest,
   DeleteOutcome,
@@ -316,5 +322,198 @@ export function useHidePages() {
       }
     },
     onError: (error) => errorToast('Hide failed', error),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Pruning
+// ---------------------------------------------------------------------------
+
+function invalidatePrune(queryClient: ReturnType<typeof useQueryClient>) {
+  void queryClient.invalidateQueries({ queryKey: ['prune'] });
+  // Staging flips `hidden`; deletion moves totals.
+  void queryClient.invalidateQueries({ queryKey: ['pages'] });
+  void queryClient.invalidateQueries({ queryKey: ['stats'] });
+}
+
+/**
+ * A 409 on a bulk lifecycle mutation means the candidate set drifted between
+ * review and action; the server changed nothing and its message carries the
+ * fresh count. Surfaced as its own toast so the user re-confirms, never
+ * retried silently.
+ */
+function pruneBulkErrorToast(title: string, error: unknown, queryClient: ReturnType<typeof useQueryClient>) {
+  if (error instanceof ApiError && error.code === 'CONFLICT') {
+    toast.error('The selection changed on the server', {
+      description: `${error.message} Nothing was changed.`,
+      duration: Infinity,
+    });
+    invalidatePrune(queryClient);
+    return;
+  }
+  errorToast(title, error);
+}
+
+function reportBulk(response: PruneBulkResponse, did: string) {
+  if (response.failed.length > 0) {
+    toast.error(`${response.changed} of ${response.requested} ${did}`, {
+      description: response.failed
+        .slice(0, 5)
+        .map((f) => `${f.document_id} — ${f.code}`)
+        .join('\n'),
+      duration: Infinity,
+    });
+  } else {
+    const via =
+      response.boost_hidden_via === 'onyx_api'
+        ? 'hidden via Onyx API'
+        : response.boost_hidden_via === 'direct_sql'
+          ? 'hidden directly (no Onyx key)'
+          : null;
+    const grace = response.stage_expires_at
+      ? `grace ends ${new Date(response.stage_expires_at).toLocaleDateString()}`
+      : null;
+    toast.success(`${formatCount(response.changed)} ${did}`, {
+      description: [via, grace].filter(Boolean).join(' · ') || undefined,
+    });
+  }
+}
+
+export function usePruneStage() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PruneSelector & { confirm_count: number }) =>
+      api.post<PruneBulkResponse>('/prune/candidates/stage', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      reportBulk(res, 'staged — hidden from search, data intact');
+    },
+    onError: (error) => pruneBulkErrorToast('Stage failed', error, queryClient),
+  });
+}
+
+export function usePruneDismiss() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PruneSelector & { exclude_future: boolean }) =>
+      api.post<PruneBulkResponse>('/prune/candidates/dismiss', body),
+    onSuccess: (res, body) => {
+      invalidatePrune(queryClient);
+      reportBulk(res, body.exclude_future ? 'dismissed, never to be re-flagged' : 'dismissed');
+    },
+    onError: (error) => pruneBulkErrorToast('Dismiss failed', error, queryClient),
+  });
+}
+
+export function usePruneRestore() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PruneSelector) =>
+      api.post<PruneBulkResponse>('/prune/candidates/restore', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      reportBulk(res, 'restored exactly as before staging');
+    },
+    onError: (error) => pruneBulkErrorToast('Restore failed', error, queryClient),
+  });
+}
+
+export function usePruneScheduleDelete() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PruneSelector & { confirm_count: number; remember?: boolean }) =>
+      api.post<PruneBulkResponse>('/prune/candidates/schedule-delete', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      reportBulk(res, 'scheduled — the reaper deletes after the grace period');
+    },
+    onError: (error) => pruneBulkErrorToast('Scheduling failed', error, queryClient),
+  });
+}
+
+export function usePruneScanCreate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: PruneScanRequest) => api.post<PruneScanItem>('/prune/scans', body),
+    onSuccess: (scan) => {
+      void queryClient.invalidateQueries({ queryKey: ['prune'] });
+      toast.success(`Scan ${scan.id} queued`, {
+        description: 'A scan is a preview. Nothing is hidden or deleted.',
+      });
+    },
+    onError: (error) => errorToast('Scan failed to queue', error),
+  });
+}
+
+export function usePruneScanCancel() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<PruneScanItem>(`/prune/scans/${id}/cancel`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['prune'] });
+      toast.success('Scan cancelled', { description: 'It stops at its next checkpoint.' });
+    },
+    onError: (error) => errorToast('Cancel failed', error),
+  });
+}
+
+export function usePruneRuleCreate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { name: string; kind: string; body: Record<string, unknown>; enabled: boolean }) =>
+      api.post<PruneRuleItem>('/prune/rules', body),
+    onSuccess: (rule) => {
+      void queryClient.invalidateQueries({ queryKey: ['prune', 'rules'] });
+      toast.success(`Rule '${rule.name}' created`, {
+        description: 'Rules start disabled — preview it against live data first.',
+      });
+    },
+    onError: (error) => errorToast('Rule creation failed', error),
+  });
+}
+
+export function usePruneRulePatch() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, ...body }: { id: number; name?: string; body?: Record<string, unknown>; enabled?: boolean }) =>
+      api.patch<PruneRuleItem>(`/prune/rules/${id}`, body),
+    onSuccess: (rule) => {
+      void queryClient.invalidateQueries({ queryKey: ['prune', 'rules'] });
+      toast.success(`Rule '${rule.name}' ${rule.enabled ? 'enabled' : 'saved'}`);
+    },
+    onError: (error) => errorToast('Rule update failed', error),
+  });
+}
+
+export function usePruneRuleDelete() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.delete<{ deleted: boolean }>(`/prune/rules/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['prune', 'rules'] });
+      toast.success('Rule deleted');
+    },
+    onError: (error) => errorToast('Rule delete failed', error),
+  });
+}
+
+export function usePruneRulePreview() {
+  return useMutation({
+    mutationFn: (id: number) => api.post<PruneRulePreviewResponse>(`/prune/rules/${id}/preview`),
+    onError: (error) => errorToast('Preview failed', error),
+  });
+}
+
+export function usePruneConfigImport() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (yaml: string) => api.putText<PruneRuleItem>('/prune/config', yaml, 'application/yaml'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['prune'] });
+      toast.success('Detector config imported', {
+        description: "Stored as the enabled detector_config rule 'default'.",
+      });
+    },
+    onError: (error) => errorToast('Config import failed', error),
   });
 }

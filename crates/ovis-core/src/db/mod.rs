@@ -19,6 +19,7 @@ pub mod indexing;
 pub mod pending_deletes;
 pub mod pool;
 pub mod probe;
+pub mod prune;
 pub mod stats;
 pub mod tags;
 

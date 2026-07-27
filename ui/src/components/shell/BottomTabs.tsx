@@ -10,9 +10,9 @@ import { NAV_ENTRIES } from './NavRail';
  */
 export function BottomTabs({ onOpenSearch }: { onOpenSearch: () => void }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
-  const [pages, connectors, activity, stats] = NAV_ENTRIES;
+  const [pages, connectors, activity, prune, stats] = NAV_ENTRIES;
   const left = [pages, connectors];
-  const right = [activity, stats];
+  const right = [activity, prune, stats];
 
   const renderTab = ({ to, label, icon: Icon }: (typeof NAV_ENTRIES)[number]) => {
     const active = pathname.startsWith(to);

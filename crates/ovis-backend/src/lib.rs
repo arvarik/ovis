@@ -179,6 +179,7 @@ pub async fn build_state(cfg: ServerConfig) -> anyhow::Result<AppState> {
     }
 
     let pending_deletes_enabled = ovis_core::db::pending_deletes::ensure_table(&db).await;
+    let prune_enabled = ovis_core::db::prune::ensure_tables(&db).await;
 
     let metrics = install_metrics_recorder();
 
@@ -192,6 +193,7 @@ pub async fn build_state(cfg: ServerConfig) -> anyhow::Result<AppState> {
         cfg,
         build: BuildInfo::current(),
         pending_deletes_enabled,
+        prune: crate::state::PruneHandle::new(prune_enabled),
         metrics,
     })
 }
@@ -216,7 +218,11 @@ pub fn spawn_background_tasks(state: AppState) {
     spawn_runtime_refresh(state.clone());
     spawn_pool_heartbeat(state.clone());
     if state.pending_deletes_enabled {
-        spawn_pending_delete_drain(state);
+        spawn_pending_delete_drain(state.clone());
+    }
+    if state.prune.enabled {
+        crate::services::prune_scan::spawn_scan_runner(state.clone());
+        crate::services::prune_reaper::spawn_reaper(state);
     }
 }
 

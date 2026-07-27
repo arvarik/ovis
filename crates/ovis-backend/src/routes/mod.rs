@@ -9,6 +9,7 @@ use crate::state::AppState;
 pub mod connectors;
 pub mod indexing;
 pub mod pages;
+pub mod prune;
 pub mod search;
 pub mod stats;
 pub mod stream;
@@ -96,6 +97,41 @@ pub fn api_router(state: AppState) -> Router {
             "/indexing/targeted-reindex/{job_id}",
             get(indexing::targeted_reindex_status),
         )
+        // --- prune ---
+        // Literal segments are declared before `{id}` captures; axum gives
+        // literals precedence, so `stage` can never be parsed as an id.
+        .route("/prune/status", get(prune::status))
+        .route("/prune/candidates", get(prune::candidates))
+        .route("/prune/candidates/stage", post(prune::stage))
+        .route("/prune/candidates/dismiss", post(prune::dismiss))
+        .route("/prune/candidates/restore", post(prune::restore))
+        .route(
+            "/prune/candidates/schedule-delete",
+            post(prune::schedule_delete),
+        )
+        .route("/prune/candidates/{id}", get(prune::candidate_detail))
+        .route(
+            "/prune/scans",
+            get(prune::list_scans).post(prune::create_scan),
+        )
+        .route("/prune/scans/{id}", get(prune::scan_detail))
+        .route("/prune/scans/{id}/cancel", post(prune::cancel_scan))
+        .route(
+            "/prune/rules",
+            get(prune::list_rules).post(prune::create_rule),
+        )
+        .route(
+            "/prune/rules/{id}",
+            patch(prune::patch_rule).delete(prune::delete_rule),
+        )
+        .route("/prune/rules/{id}/preview", post(prune::preview_rule))
+        .route(
+            "/prune/config",
+            get(prune::export_config).put(prune::import_config),
+        )
+        .route("/prune/audit", get(prune::audit))
+        .route("/prune/exclusions", get(prune::exclusions))
+        .route("/prune/exclusions/{id}", delete(prune::delete_exclusion))
         // --- tags ---
         .route("/tags", get(tags::list))
         .route("/tags/keys", get(tags::keys))

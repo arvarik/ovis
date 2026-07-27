@@ -414,6 +414,124 @@ impl ApiClient {
         self.get("/system/version").await
     }
 
+    // -----------------------------------------------------------------------
+    // Pruning
+    // -----------------------------------------------------------------------
+
+    pub async fn prune_status(&self) -> CliResult<PruneStatusResponse> {
+        self.get("/prune/status").await
+    }
+
+    pub async fn prune_candidates(
+        &self,
+        query: &str,
+    ) -> CliResult<ListResponse<PruneCandidateItem>> {
+        self.get(&format!("/prune/candidates{}", qs(query))).await
+    }
+
+    pub async fn prune_candidate(&self, id: i64) -> CliResult<PruneCandidateDetail> {
+        self.get(&format!("/prune/candidates/{id}")).await
+    }
+
+    pub async fn prune_scan_create(&self, request: &PruneScanRequest) -> CliResult<PruneScanItem> {
+        self.post("/prune/scans", request).await
+    }
+
+    pub async fn prune_scans(&self, query: &str) -> CliResult<ListResponse<PruneScanItem>> {
+        self.get(&format!("/prune/scans{}", qs(query))).await
+    }
+
+    pub async fn prune_scan(&self, id: i64) -> CliResult<PruneScanItem> {
+        self.get(&format!("/prune/scans/{id}")).await
+    }
+
+    pub async fn prune_scan_cancel(&self, id: i64) -> CliResult<PruneScanItem> {
+        self.post(&format!("/prune/scans/{id}/cancel"), &serde_json::json!({}))
+            .await
+    }
+
+    /// Bulk lifecycle mutations answer `207 Multi-Status` on partial failure;
+    /// the caller needs both the status and the per-id outcomes.
+    pub async fn prune_stage(
+        &self,
+        request: &PruneStageRequest,
+    ) -> CliResult<(u16, PruneBulkResponse)> {
+        self.post_raw("/prune/candidates/stage", request).await
+    }
+
+    pub async fn prune_dismiss(
+        &self,
+        request: &PruneDismissRequest,
+    ) -> CliResult<(u16, PruneBulkResponse)> {
+        self.post_raw("/prune/candidates/dismiss", request).await
+    }
+
+    pub async fn prune_restore(
+        &self,
+        request: &PruneRestoreRequest,
+    ) -> CliResult<(u16, PruneBulkResponse)> {
+        self.post_raw("/prune/candidates/restore", request).await
+    }
+
+    pub async fn prune_schedule_delete(
+        &self,
+        request: &PruneScheduleDeleteRequest,
+    ) -> CliResult<(u16, PruneBulkResponse)> {
+        self.post_raw("/prune/candidates/schedule-delete", request)
+            .await
+    }
+
+    pub async fn prune_audit(&self, query: &str) -> CliResult<ListResponse<PruneAuditItem>> {
+        self.get(&format!("/prune/audit{}", qs(query))).await
+    }
+
+    pub async fn prune_exclusions(
+        &self,
+        query: &str,
+    ) -> CliResult<ListResponse<PruneExclusionItem>> {
+        self.get(&format!("/prune/exclusions{}", qs(query))).await
+    }
+
+    pub async fn prune_rules(&self) -> CliResult<Vec<PruneRuleItem>> {
+        self.get("/prune/rules").await
+    }
+
+    pub async fn prune_rule_create(&self, request: &PruneRuleCreate) -> CliResult<PruneRuleItem> {
+        self.post("/prune/rules", request).await
+    }
+
+    pub async fn prune_rule_patch(
+        &self,
+        id: i64,
+        request: &PruneRulePatch,
+    ) -> CliResult<PruneRuleItem> {
+        self.patch(&format!("/prune/rules/{id}"), request).await
+    }
+
+    pub async fn prune_rule_delete(&self, id: i64) -> CliResult<serde_json::Value> {
+        self.delete(&format!("/prune/rules/{id}")).await
+    }
+
+    pub async fn prune_rule_preview(&self, id: i64) -> CliResult<PruneRulePreviewResponse> {
+        self.post(&format!("/prune/rules/{id}/preview"), &serde_json::json!({}))
+            .await
+    }
+
+    pub async fn prune_config_export(&self) -> CliResult<String> {
+        self.get_text("/prune/config").await
+    }
+
+    pub async fn prune_config_import(&self, yaml: &str) -> CliResult<PruneRuleItem> {
+        let response = self
+            .send(
+                self.request(reqwest::Method::PUT, "/prune/config")
+                    .header("content-type", "application/yaml")
+                    .body(yaml.to_string()),
+            )
+            .await?;
+        self.decode(response).await
+    }
+
     /// Open the SSE stream behind `--all`.
     pub async fn stream(&self, query: &str) -> CliResult<reqwest::Response> {
         let response = self

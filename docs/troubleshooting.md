@@ -109,6 +109,43 @@ time (sitemap walking, first-pass policies). See previous item.
 flood-stage disk watermark and set the index read-only. Free disk, clear the
 block, watch the Stats disk gauge afterwards.
 
+## Pruning
+
+**The reaper says `halted: index_read_only`** — OpenSearch tripped its disk
+watermark (see above). The reaper refuses to delete into a read-only index —
+deleting there only queues cleanup debt — and resumes on its own once the
+block clears. Staged documents keep their deadlines; nothing is lost.
+
+**`deferred: N (indexing_in_progress)` in prune status** — those documents'
+cc-pairs are mid-crawl; deleting under an active writer invites re-insert
+races, so the reaper waits. They stay staged and the next cycle retries.
+Nothing to do unless the pair is *stalled* (check Activity).
+
+**A bulk stage/delete answered 409** — the candidate set changed between your
+review and the action (a scan closed some, someone else acted, a restore
+happened). Nothing was changed; the error carries the fresh count. Re-check
+and resend with the new `confirm_count`.
+
+**A document I pruned came back** — its connector is ACTIVE and re-crawled
+it (`recrawl_risk` warned about this). If it was deleted with remember, the
+reaper has already re-staged the new copy — check the Staged tab / `ovis
+prune staged`. To make it durable, pause the connector or narrow its crawl
+in Onyx.
+
+**A scan seems stuck** — `ovis prune status` shows the active scan's
+`examined / total`. Content-detector scans (`near_duplicate`, `language`)
+read chunk text per document and legitimately take hours corpus-wide. Scans
+checkpoint continuously: cancelling, restarting the server, or crashing
+never loses progress.
+
+**`/prune/*` answers 501** — the database user could not create the
+`ovis.prune_*` tables at startup; the log says so. Grant `CREATE` on the
+database (the `ovis` schema is the only DDL OVIS runs) and restart.
+
+**Full-corpus exact-duplicate scans are slow** — apply the
+`ix_ovis_document_content_hash` index from `ops/onyx_indexes.sql`; without it
+each group page re-sorts the whole table.
+
 ## Client-side oddities
 
 | Symptom | Meaning |

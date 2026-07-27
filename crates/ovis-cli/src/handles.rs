@@ -21,6 +21,7 @@ pub const FRESHNESS: Duration = Duration::hours(1);
 pub enum HandleKind {
     Page,
     Connector,
+    PruneCandidate,
 }
 
 impl HandleKind {
@@ -28,6 +29,7 @@ impl HandleKind {
         match self {
             HandleKind::Page => "page",
             HandleKind::Connector => "connector",
+            HandleKind::PruneCandidate => "prune candidate",
         }
     }
 }

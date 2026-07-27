@@ -125,6 +125,17 @@ export const api = {
     return request<T>('PATCH', path, { body, signal });
   },
 
+  /** PUT with a raw text body (the prune config YAML import). */
+  async putText<T>(path: string, text: string, contentType: string): Promise<T> {
+    const res = await fetch(BASE + path, {
+      method: 'PUT',
+      headers: { ...baseHeaders(false), 'Content-Type': contentType },
+      body: text,
+    });
+    if (!res.ok) throw await toApiError(res);
+    return (await res.json()) as T;
+  },
+
   delete<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
     return request<T>('DELETE', path, { body, signal });
   },

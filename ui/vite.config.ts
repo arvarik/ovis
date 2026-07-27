@@ -15,7 +15,9 @@ export default defineConfig({
     port: 3000,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8080',
+        // OVIS_UI_PROXY lets a dev session point at a non-default backend
+        // (e.g. a second instance on another port) without editing this file.
+        target: process.env.OVIS_UI_PROXY ?? 'http://127.0.0.1:8080',
         changeOrigin: true,
       },
     },

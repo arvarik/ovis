@@ -58,6 +58,11 @@ scripts/capture-onyx-schema.sh <host> > tests/fixtures/onyx_schema.sql
 `tests/fixtures/seed.sql` is shaped around regression cases: a tagged document
 to delete, a document on two connectors, a null `chunk_count`, a parked
 connector, a stalled attempt, timestamps deliberately out of id order.
+`tests/fixtures/seed_prune.sql` adds the pruning shapes on top — exact-dup
+groups, aged stubs on paused *and* active pairs, a document hidden before
+staging, a German page, a near-duplicate pair — and is applied only by
+`crates/ovis-backend/tests/prune_api.rs`, which is where every hard-delete
+path runs for real (never against a live deployment).
 Tests skip themselves *loudly* when the DSN is unset, so plain `cargo test`
 works without Docker.
 

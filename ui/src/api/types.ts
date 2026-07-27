@@ -475,6 +475,218 @@ export interface VersionResponse {
 }
 
 // ---------------------------------------------------------------------------
+// Pruning (mirrors ovis-core::api_types)
+// ---------------------------------------------------------------------------
+
+export type PruneState =
+  | 'candidate'
+  | 'staged'
+  | 'deleting'
+  | 'deleted'
+  | 'dismissed'
+  | 'restored';
+
+/** Reason `detector` vocabulary — what candidate filtering matches. */
+export type PruneReasonDetector =
+  | 'duplicate'
+  | 'language'
+  | 'url_rule'
+  | 'tag_rule'
+  | 'thin'
+  | 'stale'
+  | 'recrawl';
+
+export interface PruneReason {
+  detector: PruneReasonDetector;
+  code: string;
+  detail: string;
+  confidence: number;
+  evidence: Record<string, unknown>;
+}
+
+export interface PruneCandidateItem {
+  id: number;
+  document_id: string;
+  scan_id: number | null;
+  state: PruneState;
+  reasons: PruneReason[];
+  confidence: number;
+  recrawl_risk: boolean;
+  connector_id: number | null;
+  connector_name: string | null;
+  cc_pair_id: number | null;
+  /** null = "not counted yet" — never render as 0. */
+  chunk_count: number | null;
+  semantic_id: string | null;
+  link: string | null;
+  doc_exists: boolean;
+  hidden: boolean | null;
+  prev_hidden: boolean | null;
+  staged_at: string | null;
+  stage_expires_at: string | null;
+  staged_by: string | null;
+  remember: boolean;
+  deleted_at: string | null;
+  delete_outcome: Record<string, unknown> | null;
+  resolved_reason: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PrunePairEvidence {
+  kept_id: string;
+  kept: PageListItem | null;
+  similarity: number;
+}
+
+export interface PruneCandidateDetail extends PruneCandidateItem {
+  pair: PrunePairEvidence | null;
+  excluded: boolean;
+}
+
+export interface PruneScope {
+  kind: 'all' | 'connectors' | 'url_prefix';
+  connector_ids?: number[] | null;
+  url_prefix?: string | null;
+}
+
+/** Scan-launch detector names (distinct from the reason vocabulary). */
+export type PruneScanDetector =
+  | 'exact_duplicate'
+  | 'near_duplicate'
+  | 'language'
+  | 'url_rule'
+  | 'tag_rule'
+  | 'thin'
+  | 'stale';
+
+export interface PruneScanRequest {
+  scope: PruneScope;
+  detectors: PruneScanDetector[];
+  config_overrides?: Record<string, unknown>;
+}
+
+export interface PruneScanItem {
+  id: number;
+  scope: PruneScope;
+  detectors: string[];
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled';
+  examined: number;
+  total: number | null;
+  config_hash: string;
+  stats: Record<string, number>;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+  created_at: string;
+}
+
+export interface PruneCandidateFilterBody {
+  state?: string;
+  detector?: string;
+  connector_id?: number;
+  min_confidence?: number;
+  recrawl_risk?: boolean;
+  scan_id?: number;
+}
+
+export interface PruneSelector {
+  ids?: number[];
+  filter?: PruneCandidateFilterBody;
+}
+
+export interface PruneBulkFailure {
+  candidate_id: number;
+  document_id: string;
+  code: string;
+}
+
+export interface PruneBulkResponse {
+  success: boolean;
+  requested: number;
+  changed: number;
+  failed: PruneBulkFailure[];
+  state: string;
+  boost_hidden_via: string | null;
+  stage_expires_at: string | null;
+}
+
+export interface PruneReaperStatus {
+  enabled: boolean;
+  next_run_at: string | null;
+  last_run_at: string | null;
+  halted: boolean;
+  halted_reason: string | null;
+  deferred: number;
+  deferred_reason: string | null;
+  deleted_last_hour: number;
+}
+
+export interface PruneLimits {
+  grace_days: number;
+  big_batch: number;
+  reaper_batch_size: number;
+  max_docs_per_hour: number;
+  reaper_interval_secs: number;
+}
+
+export interface PruneStatusResponse {
+  candidates: number;
+  staged: number;
+  deleting: number;
+  deleted_7d: number;
+  deleted_total: number;
+  dismissed_total: number;
+  restored_total: number;
+  exclusions: number;
+  soonest_expiry: string | null;
+  staged_expiring_24h: number;
+  reaper: PruneReaperStatus;
+  active_scan: PruneScanItem | null;
+  limits: PruneLimits;
+}
+
+export interface PruneRuleItem {
+  id: number;
+  name: string;
+  kind: 'url_rule' | 'tag_rule' | 'detector_config';
+  body: Record<string, unknown>;
+  enabled: boolean;
+  updated_at: string;
+}
+
+export interface PruneRulePreviewMatch {
+  document_id: string;
+  semantic_id: string | null;
+  matched_on: string;
+}
+
+export interface PruneRulePreviewResponse {
+  matched: number;
+  scanned: number;
+  complete: boolean;
+  sample: PruneRulePreviewMatch[];
+}
+
+export interface PruneExclusionItem {
+  document_id: string;
+  reason: string;
+  note: string | null;
+  created_at: string;
+}
+
+export interface PruneAuditItem {
+  id: number;
+  at: string;
+  actor: string;
+  action: string;
+  document_id: string | null;
+  scan_id: number | null;
+  candidate_id: number | null;
+  detail: Record<string, unknown> | null;
+}
+
+// ---------------------------------------------------------------------------
 // Error envelope (every non-2xx)
 // ---------------------------------------------------------------------------
 

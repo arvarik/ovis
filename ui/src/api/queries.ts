@@ -7,6 +7,12 @@ import { infiniteQueryOptions, queryOptions } from '@tanstack/react-query';
 import { api, encodeDocId, type QueryParams } from './client';
 import type {
   ChunksResponse,
+  PruneAuditItem,
+  PruneCandidateDetail,
+  PruneCandidateItem,
+  PruneRuleItem,
+  PruneScanItem,
+  PruneStatusResponse,
   ChunkVector,
   ConnectorDetail,
   ConnectorSummary,
@@ -273,6 +279,84 @@ export function indexingAttemptsQuery(status?: string, limit = 50) {
     staleTime: 4_000,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Pruning
+// ---------------------------------------------------------------------------
+
+/** The status strip's source of truth. Server numbers, never client-derived. */
+export const pruneStatusQuery = queryOptions({
+  queryKey: ['prune', 'status'],
+  queryFn: ({ signal }) =>
+    api.get<PruneStatusResponse>('/prune/status', undefined, signal),
+  staleTime: 4_000,
+  refetchInterval: 5_000,
+});
+
+export function pruneCandidatesQuery(params: QueryParams) {
+  return queryOptions({
+    queryKey: ['prune', 'candidates', params],
+    queryFn: ({ signal }) =>
+      api.get<ListResponse<PruneCandidateItem>>(
+        '/prune/candidates',
+        params,
+        signal,
+      ),
+    staleTime: 10_000,
+  });
+}
+
+export function pruneCandidateQuery(id: number) {
+  return queryOptions({
+    queryKey: ['prune', 'candidate', id],
+    queryFn: ({ signal }) =>
+      api.get<PruneCandidateDetail>(`/prune/candidates/${id}`, undefined, signal),
+    staleTime: 10_000,
+  });
+}
+
+export function pruneScansQuery(limit = 20) {
+  return queryOptions({
+    queryKey: ['prune', 'scans', limit],
+    queryFn: ({ signal }) =>
+      api.get<ListResponse<PruneScanItem>>('/prune/scans', { limit }, signal),
+    staleTime: 5_000,
+  });
+}
+
+/** Poll target while a scan runs; the component keys refetch off status. */
+export function pruneScanQuery(id: number) {
+  return queryOptions({
+    queryKey: ['prune', 'scan', id],
+    queryFn: ({ signal }) =>
+      api.get<PruneScanItem>(`/prune/scans/${id}`, undefined, signal),
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'queued' || status === 'running' ? 1_500 : false;
+    },
+  });
+}
+
+export const pruneRulesQuery = queryOptions({
+  queryKey: ['prune', 'rules'],
+  queryFn: ({ signal }) => api.get<PruneRuleItem[]>('/prune/rules', undefined, signal),
+  staleTime: 15_000,
+});
+
+export function pruneAuditQuery(params: QueryParams) {
+  return queryOptions({
+    queryKey: ['prune', 'audit', params],
+    queryFn: ({ signal }) =>
+      api.get<ListResponse<PruneAuditItem>>('/prune/audit', params, signal),
+    staleTime: 5_000,
+  });
+}
+
+export const pruneConfigQuery = queryOptions({
+  queryKey: ['prune', 'config'],
+  queryFn: ({ signal }) => api.getText('/prune/config', undefined, signal),
+  staleTime: 15_000,
+});
 
 /**
  * Global preset counts (D5 fix: counts are global truths, or absent).

@@ -41,6 +41,12 @@ one Rust binary.
 - 📈 **Live crawl telemetry.** Running attempts with heartbeats, pages/min and
   batch progress; *queued* is labeled queued, and *stalled* means no heartbeat
   for 45 minutes — never guessed from document counts.
+- ✂️ **Review-first pruning.** Checkpointed scans find duplicates (exact +
+  MinHash), stubs, foreign-language and rule-matched junk — as *candidates*
+  with per-document evidence, never as deletions. Acting means staging
+  (reversible `hidden`, Onyx-synced); only a rate-limited background reaper
+  ever deletes, after a grace period, and recrawled documents are auto-staged
+  again rather than silently returning. See [docs/pruning.md](docs/pruning.md).
 - 🧭 **One data plane.** Only the backend holds credentials. The web UI, the
   CLI, and your scripts all speak the same typed HTTP API — the CLI compiles
   against the very structs the server serialises.

@@ -126,8 +126,11 @@ pub enum Command {
         shell: clap_complete::Shell,
     },
 
-    /// Deferred: the pruning engine is out of scope for this redesign
-    Prune,
+    /// Find, review, stage and (via the reaper) delete junk documents
+    Prune {
+        #[command(subcommand)]
+        action: PruneCommand,
+    },
 
     /// Print connector names, one per line (used by shell completions)
     #[command(name = "__connector-names", hide = true)]
@@ -440,6 +443,285 @@ pub enum ConnectorCommand {
         /// The exact connector name, echoed back as confirmation
         #[arg(long, value_name = "NAME")]
         confirm_name: Option<String>,
+    },
+}
+
+// ---------------------------------------------------------------------------
+// prune
+// ---------------------------------------------------------------------------
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum PruneCommand {
+    /// Run a detector scan (a preview — scans never change anything)
+    Scan(PruneScanArgs),
+
+    /// Scan history with per-scan stats
+    Scans {
+        #[arg(short = 'n', long, value_name = "N")]
+        limit: Option<i64>,
+        #[arg(long, value_name = "N")]
+        page: Option<i64>,
+    },
+
+    /// List open candidates (@N handles work with the other verbs)
+    #[command(alias = "list")]
+    Ls(PruneLsArgs),
+
+    /// One candidate's reasons and evidence, duplicate pairs side by side
+    #[command(alias = "view")]
+    Show {
+        /// Candidate id or @N from the last prune list
+        #[arg(value_name = "ID|@N")]
+        id: String,
+    },
+
+    /// Close candidates as not-junk
+    Dismiss {
+        #[arg(value_name = "ID|@N", required = true)]
+        ids: Vec<String>,
+
+        /// Also put them on the exclusion list so no scan ever re-flags them
+        #[arg(long)]
+        forever: bool,
+    },
+
+    /// Hide candidates from search (reversible; the grace countdown starts)
+    Stage(PruneSelectorArgs),
+
+    /// The waiting room: staged documents and their countdowns
+    Staged {
+        #[arg(short = 'n', long, value_name = "N")]
+        limit: Option<i64>,
+        #[arg(long, value_name = "N")]
+        page: Option<i64>,
+    },
+
+    /// Un-stage: restore documents exactly as they were
+    Restore {
+        /// Candidate ids or @N handles
+        #[arg(value_name = "ID|@N")]
+        ids: Vec<String>,
+
+        /// Restore everything currently staged
+        #[arg(long, conflicts_with = "ids")]
+        all_staged: bool,
+    },
+
+    /// Schedule deletion: stage first, then the reaper deletes after the grace
+    /// period. There is no --now; nothing deletes inline.
+    #[command(alias = "rm")]
+    Delete(PruneDeleteArgs),
+
+    /// Candidates, staged countdowns, reaper state (exit 13 when halted)
+    Status,
+
+    /// The audit trail: who staged, restored, dismissed, deleted what, when
+    Log {
+        /// Only entries since then: 2h, 3d, or 2026-07-01
+        #[arg(long, value_name = "WHEN")]
+        since: Option<String>,
+        /// Filter by action, e.g. staged, deleted, deferred, halted
+        #[arg(long, value_name = "ACTION")]
+        action: Option<String>,
+        #[arg(short = 'n', long, value_name = "N")]
+        limit: Option<i64>,
+        #[arg(long, value_name = "N")]
+        page: Option<i64>,
+    },
+
+    /// Manage detection rules (URL/tag patterns, detector thresholds)
+    Rules {
+        #[command(subcommand)]
+        action: PruneRulesCommand,
+    },
+
+    /// Export or import the detector configuration as YAML
+    Config {
+        #[command(subcommand)]
+        action: PruneConfigCommand,
+    },
+
+    /// Documents that scans will never flag again
+    Exclusions {
+        #[arg(short = 'n', long, value_name = "N")]
+        limit: Option<i64>,
+        #[arg(long, value_name = "N")]
+        page: Option<i64>,
+    },
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct PruneScanArgs {
+    /// Scan the whole corpus
+    #[arg(long, conflicts_with_all = ["connectors", "prefix"])]
+    pub all: bool,
+
+    /// Connector ids or names to scan (repeatable)
+    #[arg(short = 'c', long = "connector", value_name = "ID|NAME")]
+    pub connectors: Vec<String>,
+
+    /// Scan documents whose URL starts with this prefix
+    #[arg(long, value_name = "URL", conflicts_with = "connectors")]
+    pub prefix: Option<String>,
+
+    /// Detectors to run: exact_duplicate, near_duplicate, language, url_rule,
+    /// tag_rule, thin, stale (repeatable)
+    #[arg(short = 'd', long = "detector", value_name = "NAME", required = true)]
+    pub detectors: Vec<String>,
+
+    /// Queue the scan and return instead of following its progress
+    #[arg(long)]
+    pub no_follow: bool,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct PruneLsArgs {
+    /// Reason detector: duplicate, language, url_rule, tag_rule, thin, stale,
+    /// recrawl
+    #[arg(short = 'd', long, value_name = "NAME")]
+    pub detector: Option<String>,
+
+    /// Lifecycle state: candidate (default), staged, deleting, deleted,
+    /// dismissed, restored, open, all
+    #[arg(long, value_name = "STATE")]
+    pub state: Option<String>,
+
+    /// Only candidates at or above this confidence
+    #[arg(long, value_name = "F")]
+    pub min_confidence: Option<f32>,
+
+    /// Only documents an active connector would re-crawl after deletion
+    #[arg(long)]
+    pub risky: bool,
+
+    /// Connector id or name
+    #[arg(short = 'c', long, value_name = "ID|NAME")]
+    pub connector: Option<String>,
+
+    /// Only candidates found by this scan
+    #[arg(long, value_name = "ID")]
+    pub scan: Option<i64>,
+
+    /// confidence|chunks|created|expiry, optionally :asc or :desc
+    #[arg(long, value_name = "FIELD[:DIR]")]
+    pub sort: Option<String>,
+
+    #[arg(short = 'n', long, value_name = "N")]
+    pub limit: Option<i64>,
+
+    #[arg(long, value_name = "N")]
+    pub page: Option<i64>,
+}
+
+/// Selector shared by stage: explicit handles, or filters acted on in bulk.
+#[derive(Args, Debug, Clone, Default)]
+pub struct PruneSelectorArgs {
+    /// Candidate ids or @N handles
+    #[arg(value_name = "ID|@N")]
+    pub ids: Vec<String>,
+
+    /// Act on every candidate matching the filters instead of explicit ids
+    #[arg(long, conflicts_with = "ids")]
+    pub filter: bool,
+
+    /// (with --filter) reason detector
+    #[arg(short = 'd', long, value_name = "NAME", requires = "filter")]
+    pub detector: Option<String>,
+
+    /// (with --filter) minimum confidence
+    #[arg(long, value_name = "F", requires = "filter")]
+    pub min_confidence: Option<f32>,
+
+    /// (with --filter) connector id or name
+    #[arg(short = 'c', long, value_name = "ID|NAME", requires = "filter")]
+    pub connector: Option<String>,
+
+    /// (with --filter) only candidates from this scan
+    #[arg(long, value_name = "ID", requires = "filter")]
+    pub scan: Option<i64>,
+
+    /// (with --filter) only recrawl-risk documents
+    #[arg(long, requires = "filter")]
+    pub risky: bool,
+
+    /// Type the selection size non-interactively; must match the server's
+    /// count exactly. Required for big batches even with -y.
+    #[arg(long, value_name = "N")]
+    pub confirm_count: Option<i64>,
+}
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct PruneDeleteArgs {
+    #[command(flatten)]
+    pub selector: PruneSelectorArgs,
+
+    /// Remember the deletion: if the crawler brings a document back it is
+    /// automatically re-staged (never re-deleted). Defaults to on for
+    /// recrawl-risk documents.
+    #[arg(long)]
+    pub remember: bool,
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum PruneRulesCommand {
+    /// List rules, including disabled ones
+    #[command(alias = "ls")]
+    List,
+
+    /// Create a URL or tag rule (starts disabled; preview it first)
+    Add {
+        #[arg(value_name = "NAME")]
+        name: String,
+        /// url_rule | tag_rule
+        #[arg(long, default_value = "url_rule", value_name = "KIND")]
+        kind: String,
+        /// Regex the rule matches (against the URL, or tag key=value)
+        #[arg(long, value_name = "REGEX")]
+        pattern: String,
+        /// Confidence assigned to matches (0-1]
+        #[arg(long, default_value_t = 0.8, value_name = "F")]
+        confidence: f64,
+    },
+
+    /// Sample what a rule would match against live data (never mutates)
+    Preview {
+        #[arg(value_name = "ID|NAME")]
+        rule: String,
+    },
+
+    /// Enable a rule so scans apply it
+    Enable {
+        #[arg(value_name = "ID|NAME")]
+        rule: String,
+    },
+
+    /// Disable a rule
+    Disable {
+        #[arg(value_name = "ID|NAME")]
+        rule: String,
+    },
+
+    /// Delete a rule
+    #[command(alias = "rm")]
+    Delete {
+        #[arg(value_name = "ID|NAME")]
+        rule: String,
+    },
+}
+
+#[derive(Subcommand, Debug, Clone)]
+pub enum PruneConfigCommand {
+    /// Write the effective detector config as YAML
+    Export {
+        /// Output path, or - for stdout
+        #[arg(value_name = "FILE", default_value = "-")]
+        file: String,
+    },
+    /// Import a YAML detector config (validated before anything is stored)
+    Import {
+        /// Input path, or - for stdin
+        #[arg(value_name = "FILE")]
+        file: String,
     },
 }
 

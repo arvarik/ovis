@@ -155,6 +155,51 @@ for 45 minutes — the resilience cron's own heuristic, never doc counts:
 healthy connectors legitimately sit at zero docs) and `pages_per_min` for
 running attempts. A `NOT_STARTED` attempt is normal queueing, not a stall.
 
+## Pruning
+
+The review-first junk-removal lifecycle. Scans preview, staging is the
+reversible `hidden` primitive with a server-side grace deadline, and hard
+deletion happens only in the background reaper. Full guide:
+[pruning.md](./pruning.md).
+
+```
+GET    /prune/status                      counts per state, reaper state, limits
+POST   /prune/scans                       { scope, detectors[], config_overrides? } → 202
+GET    /prune/scans                       history; GET /prune/scans/{id} is the poll target
+POST   /prune/scans/{id}/cancel           stops at the next checkpoint
+
+GET    /prune/candidates                  state, detector, connector_id, min_confidence,
+                                          recrawl_risk, scan_id, sort, limit, page
+GET    /prune/candidates/{id}             + hydrated duplicate-pair evidence
+POST   /prune/candidates/stage            { ids|filter, confirm_count } → hidden, grace starts
+POST   /prune/candidates/dismiss          { ids|filter, exclude_future }
+POST   /prune/candidates/restore          { ids|filter }  → exact un-stage
+POST   /prune/candidates/schedule-delete  { ids|filter, confirm_count, remember? }
+
+GET/POST /prune/rules                     PATCH/DELETE /prune/rules/{id}
+POST   /prune/rules/{id}/preview          sample matches, live data, zero mutation
+GET    /prune/config                      effective detector config as YAML
+PUT    /prune/config                      import YAML (validated, stored as a rule)
+GET    /prune/audit                       action, actor, document_id, since, limit, page
+GET    /prune/exclusions                  DELETE /prune/exclusions/{id}
+```
+
+Contract notes:
+
+- **Every bulk mutation resolves its selection first and compares
+  `confirm_count`**; a drifted set is `409 CONFLICT` whose message carries
+  the fresh count, and nothing changes. `filter` mirrors the GET filters.
+- Bulk responses report per-id outcomes (`failed[]` with codes; `success`
+  only when it is empty; HTTP 207 on partial failure) plus
+  `boost_hidden_via` so a direct-SQL fallback is visible.
+- `chunk_count: null` on a candidate means "not counted yet", never "empty" —
+  same as everywhere else.
+- Scan `detectors[]` names what runs; nothing runs unasked. Candidate
+  `detector` filtering uses the *reason* vocabulary (`duplicate`, `thin`,
+  `language`, `url_rule`, `tag_rule`, `stale`, `recrawl`).
+- `/prune/*` answers `501 NOT_AVAILABLE` when the `ovis.prune_*` tables could
+  not be created at startup.
+
 ## Tags, stats, system
 
 ```

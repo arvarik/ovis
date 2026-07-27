@@ -37,6 +37,7 @@ operational ones:
 | `OVIS_SHUTDOWN_GRACE_SECS` | 10 | drain window on SIGTERM |
 | `OVIS_RUNTIME_REFRESH_SECS` | 60 | index-name / kNN-capability re-probe |
 | `OVIS_LOG_FORMAT` / `RUST_LOG` | text / info | `json` for shippers |
+| `OVIS_PRUNE_*` | conservative | grace period, reaper rates, batch guards — see [pruning.md](./pruning.md) |
 
 A blank optional value (`OVIS_API_TOKEN=` sourced with `set -a`) normalises to
 *unset* — it never becomes an empty token that any caller could satisfy.
@@ -64,8 +65,12 @@ The CLI's `ovis status` renders the same data and exits 13 when degraded.
 `GET /api/v1/system/metrics` (Prometheus text): request histograms by
 route/status, DB pool size and idle count, cache entry counts, pending index
 deletes, and gauges for `ovis_pg_up`, `ovis_schema_ok`, `ovis_knn_ready`.
+Pruning exports `ovis_prune_candidates`, `ovis_prune_staged`,
+`ovis_prune_deferred`, `ovis_prune_halted` (gauges) and
+`ovis_prune_deleted_total` (counter).
 Useful alerts: `ovis_pg_up == 0`, `ovis_schema_ok == 0`, pending index deletes
-growing, and the disk figures from `/stats/overview` (below).
+growing, `ovis_prune_halted == 1` for more than one reaper cycle, and the
+disk figures from `/stats/overview` (below).
 
 ## Performance
 
@@ -111,7 +116,13 @@ list path is ~965 ms instead of sub-millisecond. Re-check via
 - **Deleted documents can come back.** A document whose connector is still
   ACTIVE will be re-crawled at its next refresh (30 days for web connectors on
   the reference deployment). Every delete surface reports `recrawl_risk`;
-  durable exclusion is a pruning concern, out of scope here.
+  pruning handles it durably — deletions with *remember* are auto-staged
+  again when recrawled ([pruning.md](./pruning.md)).
+- **The prune reaper is deliberately slow.** Staged documents delete only
+  after their grace period, in small batches, rate-limited per hour, pausing
+  for pairs that are mid-index and halting outright while the index is
+  read-only. `ovis prune status` (exit 13 when halted) and the UI status
+  strip surface all of it.
 - **Parked connectors are finished on purpose.** The resilience cron marks
   first-pass-complete cc-pairs with a sentinel in their last attempt error;
   OVIS surfaces this as `parked` and gates `run-once` behind an explicit
@@ -133,7 +144,8 @@ list path is ~965 ms instead of sub-millisecond. Re-check via
   the grace period); a multi-thousand-row SSE stream in flight completes
   before exit.
 - **Failed index deletes retry themselves.** `ovis.pending_index_deletes`
-  (the only schema OVIS creates) queues them; watch its gauge in metrics.
+  queues them; watch its gauge in metrics. The `ovis` schema (retry queue +
+  the `prune_*` tables) is the only DDL OVIS runs.
 
 ## Upgrades
 

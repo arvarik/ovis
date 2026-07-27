@@ -62,6 +62,25 @@ pub struct ServerConfig {
     pub shutdown_grace_secs: u64,
 
     pub log_format: String,
+
+    /// Days a staged (hidden) document waits before the reaper may delete it.
+    /// 0 is allowed — deletion is then due at the next reaper cycle — but
+    /// clients require the typed-count confirmation for it everywhere.
+    pub prune_grace_days: i64,
+    /// Seconds between reaper cycles.
+    pub prune_reaper_interval_secs: u64,
+    /// Documents per reaper batch. Clamped to `batch_delete_max`.
+    pub prune_reaper_batch_size: usize,
+    /// Hard ceiling on reaper deletions per trailing hour. The 375 GB index
+    /// has tripped disk watermarks before; deletion pressure stays gentle.
+    pub prune_max_docs_per_hour: i64,
+    /// Bulk mutations larger than this require the typed count on both
+    /// surfaces.
+    pub prune_big_batch: i64,
+    /// Documents per scan page (keyset batch size).
+    pub prune_scan_page_size: i64,
+    /// Milliseconds the reaper sleeps between delete batches.
+    pub prune_reaper_pause_ms: u64,
 }
 
 impl Default for ServerConfig {
@@ -92,6 +111,13 @@ impl Default for ServerConfig {
             body_limit_bytes: 2 * 1024 * 1024,
             shutdown_grace_secs: 10,
             log_format: "text".into(),
+            prune_grace_days: 7,
+            prune_reaper_interval_secs: 300,
+            prune_reaper_batch_size: 100,
+            prune_max_docs_per_hour: 2000,
+            prune_big_batch: 500,
+            prune_scan_page_size: 1000,
+            prune_reaper_pause_ms: 2000,
         }
     }
 }
@@ -197,7 +223,35 @@ impl ServerConfig {
                 "OVIS_BATCH_DELETE_MAX must be at least 1.".into(),
             ));
         }
+        if !(0..=90).contains(&self.prune_grace_days) {
+            return Err(ConfigError(
+                "OVIS_PRUNE_GRACE_DAYS must be between 0 and 90.".into(),
+            ));
+        }
+        if self.prune_reaper_batch_size < 1 {
+            return Err(ConfigError(
+                "OVIS_PRUNE_REAPER_BATCH_SIZE must be at least 1.".into(),
+            ));
+        }
+        if self.prune_max_docs_per_hour < 1 {
+            return Err(ConfigError(
+                "OVIS_PRUNE_MAX_DOCS_PER_HOUR must be at least 1.".into(),
+            ));
+        }
+        if self.prune_big_batch < 1 {
+            return Err(ConfigError("OVIS_PRUNE_BIG_BATCH must be at least 1.".into()));
+        }
+        if self.prune_scan_page_size < 1 {
+            return Err(ConfigError(
+                "OVIS_PRUNE_SCAN_PAGE_SIZE must be at least 1.".into(),
+            ));
+        }
         Ok(())
+    }
+
+    /// The reaper batch size, never above the batch-delete ceiling.
+    pub fn prune_reaper_batch(&self) -> usize {
+        self.prune_reaper_batch_size.min(self.batch_delete_max)
     }
 
     /// Warnings worth saying out loud once the logger exists.

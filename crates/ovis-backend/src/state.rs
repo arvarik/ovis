@@ -203,6 +203,53 @@ impl BuildInfo {
     }
 }
 
+/// Live reaper state. In-memory only — the durable truth (candidate states,
+/// audit) lives in `ovis.*`; this is the "what is the reaper doing right now"
+/// that `/prune/status` reports.
+#[derive(Debug, Clone, Default)]
+pub struct PruneReaperState {
+    pub last_run_at: Option<DateTime<Utc>>,
+    pub next_run_at: Option<DateTime<Utc>>,
+    /// Set while the reaper refuses to delete (e.g. `index_read_only`).
+    pub halted_reason: Option<String>,
+    /// Documents whose deletion was deferred in the last cycle.
+    pub deferred: i64,
+    pub deferred_reason: Option<String>,
+}
+
+/// Shared pruning runtime: whether the `ovis.prune_*` tables exist, the
+/// reaper's live state, and the scan runner's wake-up handle.
+#[derive(Clone)]
+pub struct PruneHandle {
+    /// `false` when the database user could not create the tables; every
+    /// `/prune/*` endpoint reports the feature unavailable.
+    pub enabled: bool,
+    pub reaper: Arc<std::sync::RwLock<PruneReaperState>>,
+    /// Notified when a scan is queued, so the runner picks it up immediately
+    /// rather than at its next poll tick.
+    pub scan_wake: Arc<tokio::sync::Notify>,
+}
+
+impl PruneHandle {
+    pub fn new(enabled: bool) -> Self {
+        Self {
+            enabled,
+            reaper: Arc::new(std::sync::RwLock::new(PruneReaperState::default())),
+            scan_wake: Arc::new(tokio::sync::Notify::new()),
+        }
+    }
+
+    pub fn reaper_state(&self) -> PruneReaperState {
+        self.reaper.read().map(|s| s.clone()).unwrap_or_default()
+    }
+
+    pub fn update_reaper<F: FnOnce(&mut PruneReaperState)>(&self, f: F) {
+        if let Ok(mut guard) = self.reaper.write() {
+            f(&mut guard);
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub db: PgPool,
@@ -219,6 +266,7 @@ pub struct AppState {
     /// Whether `ovis.pending_index_deletes` exists, i.e. whether a failed index
     /// delete will be retried.
     pub pending_deletes_enabled: bool,
+    pub prune: PruneHandle,
     pub metrics: Option<Arc<metrics_exporter_prometheus::PrometheusHandle>>,
 }
 

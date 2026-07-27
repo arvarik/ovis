@@ -36,6 +36,8 @@ step — the exact next-page command, the verbs that apply.
 ```
 page        list view text chunks open edit delete search
 connector   list view docs attempts errors pause resume run prune delete
+prune       scan scans ls show dismiss stage staged restore delete
+            status log rules config exclusions     (see docs/pruning.md)
 search      content search over the chunk index
 stats       overview | connectors | timeline | sources
 status      server and dependency health          (exit 0 healthy, 13 degraded)

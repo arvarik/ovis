@@ -33,8 +33,11 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
       className={cn(
         'inline-flex items-center justify-center gap-2 transition-colors duration-150 select-none',
         'disabled:pointer-events-none disabled:opacity-50',
-        VARIANTS[variant],
+        // Sizes before variants: tailwind-merge cannot tell the custom
+        // text-label/text-body *size* utilities apart from text-* colors, so
+        // whichever comes last wins — and the variant's text color must win.
         SIZES[size],
+        VARIANTS[variant],
         className,
       )}
       {...props}

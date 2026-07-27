@@ -612,6 +612,360 @@ pub struct VersionResponse {
     pub profile: String,
 }
 
+// ---------------------------------------------------------------------------
+// Pruning
+// ---------------------------------------------------------------------------
+
+/// One typed reason a detector flagged a document. Reasons are shown
+/// individually — a candidate's `confidence` is the max reason confidence,
+/// never an average.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneReason {
+    /// `duplicate | language | url_rule | tag_rule | thin | stale | recrawl | custom`
+    pub detector: String,
+    /// Machine-stable code, e.g. `exact_duplicate_of`, `chunkless_stub`,
+    /// `lang_not_allowed`, `recrawled_after_prune`.
+    pub code: String,
+    /// Human-specific detail, e.g. "94% similar to https://…/a".
+    pub detail: String,
+    /// 0.0–1.0. What the number means is defined per detector.
+    pub confidence: f32,
+    /// Structured evidence: pair ids, similarity, detected language, pattern.
+    pub evidence: serde_json::Value,
+}
+
+/// One row of `GET /prune/candidates`. Lifecycle state plus enough of the
+/// document to review without a second request.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneCandidateItem {
+    pub id: i64,
+    pub document_id: String,
+    pub scan_id: Option<i64>,
+    /// `candidate | staged | deleting | deleted | dismissed | restored`.
+    pub state: String,
+    pub reasons: Vec<PruneReason>,
+    /// Max reason confidence.
+    pub confidence: f32,
+    /// Derived from the owning cc-pair status at flag time.
+    pub recrawl_risk: bool,
+    pub connector_id: Option<i32>,
+    pub connector_name: Option<String>,
+    pub cc_pair_id: Option<i32>,
+    /// Live value when the document row still exists, otherwise the value
+    /// recorded at flag time. `null` means "not counted yet", never "empty".
+    pub chunk_count: Option<i32>,
+    /// Live title/link, `null` after deletion.
+    pub semantic_id: Option<String>,
+    pub link: Option<String>,
+    /// Whether the `document` row still exists.
+    pub doc_exists: bool,
+    /// The document's current `hidden` flag, when the row exists.
+    pub hidden: Option<bool>,
+    /// `hidden` as it was immediately before staging — what restore returns to.
+    pub prev_hidden: Option<bool>,
+    pub staged_at: Option<DateTime<Utc>>,
+    /// When the grace period ends and the reaper may delete. Server-side truth.
+    pub stage_expires_at: Option<DateTime<Utc>>,
+    pub staged_by: Option<String>,
+    /// Whether deletion should record an exclusion (auto-restage on recrawl).
+    pub remember: bool,
+    pub deleted_at: Option<DateTime<Utc>>,
+    /// `{ chunks_deleted, index_cleanup_pending }` for deleted rows.
+    pub delete_outcome: Option<serde_json::Value>,
+    /// Why a terminal state was reached: `restored | dismissed |
+    /// no_longer_matches | …`.
+    pub resolved_reason: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// `GET /prune/candidates/{id}` — the item plus hydrated duplicate-pair
+/// evidence when a duplicate reason exists.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneCandidateDetail {
+    #[serde(flatten)]
+    pub item: PruneCandidateItem,
+    /// Both sides of the duplicate pair, when a duplicate reason exists.
+    pub pair: Option<PrunePairEvidence>,
+    /// Whether this document id is on the exclusion list.
+    pub excluded: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PrunePairEvidence {
+    /// The keeper's document id (from the reason evidence).
+    pub kept_id: String,
+    /// The keeper document, when it still exists.
+    pub kept: Option<PageListItem>,
+    /// Estimated Jaccard (near) or 1.0 (exact).
+    pub similarity: f64,
+}
+
+/// Scan scope. `kind` is `all | connectors | url_prefix`.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneScope {
+    pub kind: String,
+    #[serde(default)]
+    pub connector_ids: Option<Vec<i32>>,
+    #[serde(default)]
+    pub url_prefix: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneScanRequest {
+    pub scope: PruneScope,
+    /// Detector names to run: `exact_duplicate | near_duplicate | language |
+    /// url_rule | tag_rule | thin | stale`. Explicit — nothing runs unasked.
+    pub detectors: Vec<String>,
+    /// Optional per-scan overrides, merged over stored detector config.
+    #[serde(default)]
+    pub config_overrides: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneScanItem {
+    pub id: i64,
+    pub scope: PruneScope,
+    pub detectors: Vec<String>,
+    /// `queued | running | done | failed | cancelled`.
+    pub status: String,
+    /// Documents examined so far. Live while running.
+    pub examined: i64,
+    /// Total documents in scope, when known.
+    pub total: Option<i64>,
+    /// Hash of the effective detector config this scan ran under.
+    pub config_hash: String,
+    /// `{ candidates_new, candidates_updated, candidates_closed,
+    ///    excluded_skipped, … }` — counters, all server truths.
+    pub stats: serde_json::Value,
+    pub started_at: Option<DateTime<Utc>>,
+    pub finished_at: Option<DateTime<Utc>>,
+    pub error: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Filter half of a bulk selector. Mirrors the `GET /prune/candidates` filters.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneCandidateFilterBody {
+    #[serde(default)]
+    pub state: Option<String>,
+    #[serde(default)]
+    pub detector: Option<String>,
+    #[serde(default)]
+    pub connector_id: Option<i32>,
+    #[serde(default)]
+    pub min_confidence: Option<f32>,
+    #[serde(default)]
+    pub recrawl_risk: Option<bool>,
+    #[serde(default)]
+    pub scan_id: Option<i64>,
+}
+
+/// `POST /prune/candidates/stage` — candidate → staged (hidden, grace starts).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneStageRequest {
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
+    #[serde(default)]
+    pub filter: Option<PruneCandidateFilterBody>,
+    /// Must equal the resolved selection size, or the request is a 409 carrying
+    /// the fresh count. No bulk mutation runs on a drifted set.
+    pub confirm_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneDismissRequest {
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
+    #[serde(default)]
+    pub filter: Option<PruneCandidateFilterBody>,
+    /// Also record the documents on the exclusion list so future scans never
+    /// re-flag them.
+    #[serde(default)]
+    pub exclude_future: bool,
+    /// Optional here (dismiss keeps data); verified when present.
+    #[serde(default)]
+    pub confirm_count: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneRestoreRequest {
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
+    #[serde(default)]
+    pub filter: Option<PruneCandidateFilterBody>,
+    /// Optional: restore is the safe direction. Verified when present.
+    #[serde(default)]
+    pub confirm_count: Option<i64>,
+}
+
+/// `POST /prune/candidates/schedule-delete`. Never deletes inline: candidates
+/// are staged first (grace applies in full), already-staged documents have
+/// their grace deadline brought forward to now. The reaper executes.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneScheduleDeleteRequest {
+    #[serde(default)]
+    pub ids: Option<Vec<i64>>,
+    #[serde(default)]
+    pub filter: Option<PruneCandidateFilterBody>,
+    pub confirm_count: i64,
+    /// Record an exclusion at delete time so a recrawl auto-stages the document
+    /// again. `null` defaults to the per-document `recrawl_risk`.
+    #[serde(default)]
+    pub remember: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneBulkFailure {
+    pub candidate_id: i64,
+    pub document_id: String,
+    pub code: String,
+}
+
+/// Outcome of a bulk lifecycle mutation, per-id honest like batch delete.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneBulkResponse {
+    /// True only when `failed` is empty.
+    pub success: bool,
+    /// Selection size after resolution (what `confirm_count` had to match).
+    pub requested: i64,
+    pub changed: i64,
+    pub failed: Vec<PruneBulkFailure>,
+    /// Resulting state of the changed rows.
+    pub state: String,
+    /// `onyx_api` or `direct_sql` for stage/restore, `null` otherwise.
+    pub boost_hidden_via: Option<String>,
+    /// For staging: when the batch's grace ends (latest deadline in the batch).
+    pub stage_expires_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneReaperStatus {
+    pub enabled: bool,
+    pub next_run_at: Option<DateTime<Utc>>,
+    pub last_run_at: Option<DateTime<Utc>>,
+    /// Halted means the reaper refuses to delete (index read-only) and says so.
+    pub halted: bool,
+    pub halted_reason: Option<String>,
+    /// Documents whose deletion was deferred last cycle (owning pair indexing).
+    pub deferred: i64,
+    pub deferred_reason: Option<String>,
+    /// Deleted in the trailing hour, against `max_docs_per_hour`.
+    pub deleted_last_hour: i64,
+}
+
+/// Server-side limits, surfaced so clients can render guardrails honestly.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneLimits {
+    pub grace_days: i64,
+    pub big_batch: i64,
+    pub reaper_batch_size: i64,
+    pub max_docs_per_hour: i64,
+    pub reaper_interval_secs: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneStatusResponse {
+    /// Open candidates awaiting review.
+    pub candidates: i64,
+    pub staged: i64,
+    pub deleting: i64,
+    pub deleted_7d: i64,
+    pub deleted_total: i64,
+    pub dismissed_total: i64,
+    pub restored_total: i64,
+    pub exclusions: i64,
+    /// Soonest staged expiry — the countdown the UI shows.
+    pub soonest_expiry: Option<DateTime<Utc>>,
+    pub staged_expiring_24h: i64,
+    pub reaper: PruneReaperStatus,
+    /// The currently running or queued scan, if any.
+    pub active_scan: Option<PruneScanItem>,
+    pub limits: PruneLimits,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneRuleItem {
+    pub id: i64,
+    pub name: String,
+    /// `url_rule | tag_rule | detector_config`.
+    pub kind: String,
+    pub body: serde_json::Value,
+    pub enabled: bool,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneRuleCreate {
+    pub name: String,
+    pub kind: String,
+    pub body: serde_json::Value,
+    /// Rules start disabled unless explicitly enabled.
+    #[serde(default)]
+    pub enabled: bool,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct PruneRulePatch {
+    #[serde(default)]
+    pub name: Option<String>,
+    #[serde(default)]
+    pub body: Option<serde_json::Value>,
+    #[serde(default)]
+    pub enabled: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneRulePreviewMatch {
+    pub document_id: String,
+    pub semantic_id: Option<String>,
+    /// What the pattern matched against (the URL, or `key=value` for tag rules).
+    pub matched_on: String,
+}
+
+/// `POST /prune/rules/{id}/preview` — sample matches against live data.
+/// Never mutates. `complete: false` means the preview cap stopped the scan
+/// early and `matched` is a lower bound over `scanned` rows, not a total.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneRulePreviewResponse {
+    pub matched: i64,
+    pub scanned: i64,
+    pub complete: bool,
+    pub sample: Vec<PruneRulePreviewMatch>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneExclusionItem {
+    pub document_id: String,
+    /// `deleted_with_remember | user_excluded`.
+    pub reason: String,
+    pub note: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PruneAuditItem {
+    pub id: i64,
+    pub at: DateTime<Utc>,
+    /// Bearer-authenticated caller, `local`, or a background task name
+    /// (`reaper`, `scan`).
+    pub actor: String,
+    pub action: String,
+    pub document_id: Option<String>,
+    pub scan_id: Option<i64>,
+    pub candidate_id: Option<i64>,
+    pub detail: Option<serde_json::Value>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

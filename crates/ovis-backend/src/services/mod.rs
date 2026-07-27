@@ -6,6 +6,9 @@
 
 pub mod connectors;
 pub mod pages;
+pub mod prune;
+pub mod prune_reaper;
+pub mod prune_scan;
 pub mod search;
 pub mod stats;
 pub mod system;

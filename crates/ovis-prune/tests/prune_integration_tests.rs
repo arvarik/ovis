@@ -1,184 +1,104 @@
-use ovis_prune::{DocumentWithContent, PreferKeepPolicy, PruneConfig, PruningEngine};
-use serde_json::json;
+//! Crate-level integration: YAML config in, detection over an in-memory
+//! corpus out. (The old tests here exercised the self-contained
+//! `PruningEngine`, which the 2026 rework replaced with backend-fed
+//! detectors; the kept core — config round-trip + MinHash dedup — is what
+//! these cover.)
 
-fn make_doc(
-    id: &str,
-    title: &str,
-    link: Option<&str>,
-    content: &str,
-    updated_at: Option<chrono::DateTime<chrono::Utc>>,
-) -> DocumentWithContent {
+use ovis_prune::{
+    DocumentWithContent, MinHashDedupEngine, PreferKeepPolicy, PruneConfig,
+};
+
+fn make_doc(id: &str, link: Option<&str>, content: &str) -> DocumentWithContent {
     DocumentWithContent {
         id: id.to_string(),
-        semantic_id: title.to_string(),
-        connector_id: 10,
+        semantic_id: id.to_string(),
+        connector_id: Some(10),
         link: link.map(|s| s.to_string()),
         content: content.to_string(),
-        updated_at,
-        metadata: json!({"source": "integration_test"}),
+        chunk_count: None,
+        updated_at: None,
     }
 }
 
+const GUIDE: &str = "This comprehensive operations guide describes how the homelab search \
+    cluster is deployed, monitored and upgraded. It walks through Postgres tuning, \
+    OpenSearch shard sizing, connector scheduling, embedding throughput, and the \
+    recovery procedures used when the disk watermark trips or an index attempt stalls. \
+    Each section closes with a checklist that the on-call operator is expected to follow.";
+
 #[test]
-fn test_full_pruning_pipeline_with_yaml_config() {
-    let yaml_config = r#"
-version: "1.0"
-repository_scope: "OVIS Integration Test Suite Repository"
-
-heuristics:
-  min_char_count: 150
-  max_char_count: 300000
-  min_alphanumeric_ratio: 0.50
-  title_blacklist_regex:
-    - "(?i)^404 Not Found"
-    - "(?i)^Access Denied"
-    - "(?i)^Login \\| "
-  url_blacklist_patterns:
-    - "*/tag/*"
-    - "*/category/*"
-    - "*?share=*"
-
-deduplication:
-  enabled: true
+fn yaml_config_drives_the_dedup_engine_end_to_end() {
+    let yaml = r#"
+dedup:
   minhash:
     num_perm: 128
     jaccard_threshold: 0.85
     shingle_size: 5
-  prefer_keep: "longest_content"
-
-execution:
-  dry_run: true
-  auto_delete: false
-  audit_log_path: "./target/prune_integration_audit_log.json"
+  similarity_threshold: 0.90
+  report_only_low: 0.80
+  prefer_keep: shortest_url
+language:
+  enabled: true
+  allowed: [en, de]
 "#;
+    let config = PruneConfig::from_yaml(yaml).expect("yaml parses");
+    assert_eq!(config.dedup.minhash.jaccard_threshold, 0.85);
+    assert_eq!(config.dedup.prefer_keep, PreferKeepPolicy::ShortestUrl);
+    assert!(config.language.enabled);
 
-    let config = PruneConfig::from_yaml(yaml_config).expect("YAML parsing failed");
-    let engine = PruningEngine::new(config).expect("Engine build failed");
+    let engine = MinHashDedupEngine::new(config.dedup.minhash.clone());
 
-    let clean_text_1 = "This is high quality engineering documentation describing the operational procedures and architectural components of the OVIS search index. It contains comprehensive explanations of PostgreSQL relational metadata schema, OpenSearch vector chunk storage, Axum REST endpoints, ratatui TUI dashboard interface, and MinHash LSH deduplication pipeline.";
-    let clean_text_2 = "This is high quality engineering documentation describing the operational procedures and architectural components of the OVIS search index. It contains comprehensive explanations of PostgreSQL relational metadata schema, OpenSearch vector chunk storage, Axum REST endpoints, ratatui TUI dashboard interface, and MinHash LSH deduplication pipeline with extra supplementary notes.";
-
+    let near_copy = format!("{GUIDE} Mirrored for the archive.");
     let docs = vec![
-        // 1. Min char count failure
-        make_doc("doc_short", "Short Stub", None, "Short text under 150 chars", None),
-        // 2. 404 Error page failure
+        make_doc("https://a/guide", Some("https://a/guide"), GUIDE),
         make_doc(
-            "doc_404",
-            "404 Not Found",
-            None,
-            "The requested document could not be found on the server. Please verify your requested URL or return to home page.",
-            None,
-        ),
-        // 3. Blacklisted URL failure
-        make_doc(
-            "doc_tag",
-            "Tag Archive Page",
-            Some("https://example.com/blog/tag/microservices"),
-            "This is a tag archive page listing all blog posts tagged with microservices architecture and software design principles.",
-            None,
-        ),
-        // 4. Low alphanumeric ratio failure
-        make_doc(
-            "doc_spam",
-            "Corrupted Symbol Dump",
-            None,
-            "!@#$%^&*()_+={}:\"<>?~`!@#$%^&*()_+={}:\"<>?~`!@#$%^&*()_+={}:\"<>?~`!@#$%^&*()_+={}:\"<>?~`!@#$%^&*()_+={}:\"<>?~`!@#$%^&*()_+={}:\"<>?~`!@#$%^&*()_+={}:\"<>?~` binary data",
-            None,
-        ),
-        // 5 & 6. Near-duplicate document pair
-        make_doc(
-            "doc_orig",
-            "OVIS Engine Spec",
-            Some("https://docs.company.com/ovis/spec"),
-            clean_text_1,
-            None,
+            "https://a/guide/print/view",
+            Some("https://a/guide/print/view"),
+            &near_copy,
         ),
         make_doc(
-            "doc_copy",
-            "OVIS Engine Spec (Copy)",
-            Some("https://docs.company.com/ovis/spec_copy"),
-            clean_text_2,
-            None,
+            "https://a/unrelated",
+            Some("https://a/unrelated"),
+            "A completely different page about gardening tips, soil acidity, compost \
+             rotation and seasonal pruning of fruit trees in a temperate climate.",
         ),
     ];
 
-    let report = engine
-        .evaluate_repository(&docs)
-        .expect("Evaluation failed");
-
-    assert_eq!(report.total_documents_evaluated, 6);
-    assert!(report.total_candidates_flagged >= 4);
-    assert!(report.dry_run);
-
-    // Save JSON audit report to test disk output
-    let temp_log_path = "./target/test_prune_audit_log.json";
-    report
-        .save_to_file(temp_log_path)
-        .expect("Failed to write audit log file");
-    assert!(std::path::Path::new(temp_log_path).exists());
-
-    // Read back log file and parse JSON
-    let content = std::fs::read_to_string(temp_log_path).unwrap();
-    assert!(content.contains("OVIS Integration Test Suite Repository"));
+    let pairs = engine.detect_duplicates(&docs, config.dedup.prefer_keep);
+    assert_eq!(pairs.len(), 1, "only the near-copy pair is detected");
+    let pair = &pairs[0];
+    assert_eq!(pair.kept_document_id, "https://a/guide", "shortest URL wins");
+    assert_eq!(pair.duplicate_document_id, "https://a/guide/print/view");
+    assert!(pair.jaccard_similarity >= 0.85);
+    assert!(pair.reason.contains("shortest URL"));
 }
 
 #[test]
-fn test_prefer_keep_policies_in_deduplication() {
-    let now = chrono::Utc::now();
-    let older = now - chrono::Duration::hours(10);
+fn config_export_import_round_trips_through_yaml() {
+    let mut config = PruneConfig::default();
+    config.language.enabled = true;
+    config.language.allowed = vec!["en".into(), "fr".into()];
+    config.dedup.similarity_threshold = 0.93;
+    config.thin.min_age_days = 14;
 
-    let doc_a = make_doc(
-        "doc_a",
-        "Short Title",
-        Some("https://example.com/a"),
-        "Comprehensive technical guide to distributed data pipelines and storage architecture in modern Rust applications.",
-        Some(older),
-    );
-    let doc_b = make_doc(
-        "doc_b",
-        "Longer Detailed Title",
-        Some("https://example.com/sub/directory/deep/path/b"),
-        "Comprehensive technical guide to distributed data pipelines and storage architecture in modern Rust applications with additional paragraph content.",
-        Some(now),
-    );
+    let exported = config.to_yaml().expect("exports");
+    let imported = PruneConfig::from_yaml(&exported).expect("imports");
+    assert_eq!(config, imported);
+}
 
-    let docs = vec![doc_a, doc_b];
+#[test]
+fn signatures_survive_serialisation_boundaries() {
+    // The full-corpus scan persists signatures between pages; equality after a
+    // byte round-trip is what makes that checkpointing sound.
+    let config = PruneConfig::default();
+    let engine = MinHashDedupEngine::new(config.dedup.minhash.clone());
+    let sig = engine.signature_for_text(GUIDE);
 
-    // Policy 1: Longest Content -> keep doc_b (longer content)
-    let mut config1 = PruneConfig::default();
-    config1.deduplication.prefer_keep = PreferKeepPolicy::LongestContent;
-    let engine1 = PruningEngine::new(config1).unwrap();
-    let (dups1, _) = engine1
-        .evaluate_repository(&docs)
-        .map(|r| (r.duplicate_pairs, r.candidates))
-        .unwrap();
-    if !dups1.is_empty() {
-        assert_eq!(dups1[0].kept_document_id, "doc_b");
-        assert_eq!(dups1[0].duplicate_document_id, "doc_a");
-    }
-
-    // Policy 2: Newest Updated -> keep doc_b (now > older)
-    let mut config2 = PruneConfig::default();
-    config2.deduplication.prefer_keep = PreferKeepPolicy::NewestUpdated;
-    let engine2 = PruningEngine::new(config2).unwrap();
-    let (dups2, _) = engine2
-        .evaluate_repository(&docs)
-        .map(|r| (r.duplicate_pairs, r.candidates))
-        .unwrap();
-    if !dups2.is_empty() {
-        assert_eq!(dups2[0].kept_document_id, "doc_b");
-    }
-
-    // Policy 3: Shortest URL -> keep doc_a ("https://example.com/a" is shorter)
-    let mut config3 = PruneConfig::default();
-    config3.deduplication.prefer_keep = PreferKeepPolicy::ShortestUrl;
-    let engine3 = PruningEngine::new(config3).unwrap();
-    let (dups3, _) = engine3
-        .evaluate_repository(&docs)
-        .map(|r| (r.duplicate_pairs, r.candidates))
-        .unwrap();
-    if !dups3.is_empty() {
-        assert_eq!(dups3[0].kept_document_id, "doc_a");
-        assert_eq!(dups3[0].duplicate_document_id, "doc_b");
-    }
+    let bytes: Vec<u8> = sig.iter().flat_map(|v| v.to_le_bytes()).collect();
+    let restored: Vec<u64> = bytes
+        .chunks_exact(8)
+        .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+        .collect();
+    assert_eq!(sig, restored);
+    assert_eq!(engine.jaccard_similarity(&sig, &restored), 1.0);
 }

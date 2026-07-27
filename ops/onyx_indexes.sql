@@ -87,6 +87,14 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_ovis_document_tag_by_tag
     ON public.document__tag (tag_id);
 
 -- ---------------------------------------------------------------------------
+-- 6. Exact-duplicate detection (the pruning track). The scan pages content-
+--    hash groups in hash order; without this index every page is a full
+--    sort of 1.65M rows. Partial: NULL hashes can never form a group.
+-- ---------------------------------------------------------------------------
+CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_ovis_document_content_hash
+    ON public.document (content_hash) WHERE content_hash IS NOT NULL;
+
+-- ---------------------------------------------------------------------------
 -- Verification
 -- ---------------------------------------------------------------------------
 -- SELECT indexrelname, pg_size_pretty(pg_relation_size(indexrelid)) AS size
@@ -110,4 +118,5 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_ovis_document_tag_by_tag
 -- DROP INDEX CONCURRENTLY IF EXISTS public.ix_ovis_document_id_trgm;
 -- DROP INDEX CONCURRENTLY IF EXISTS public.ix_ovis_dcc_by_doc;
 -- DROP INDEX CONCURRENTLY IF EXISTS public.ix_ovis_document_tag_by_tag;
+-- DROP INDEX CONCURRENTLY IF EXISTS public.ix_ovis_document_content_hash;
 -- (pg_trgm is left installed; it is harmless and may be in use elsewhere.)

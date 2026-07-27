@@ -8,7 +8,7 @@ const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 
 const base = process.argv[2] ?? 'http://localhost:3001';
-const routes = ['/pages', '/pages?q=kant', '/connectors', '/connectors/5', '/activity', '/stats'];
+const routes = ['/pages', '/pages?q=kant', '/connectors', '/connectors/5', '/activity', '/stats', '/prune', '/prune?tab=staged', '/prune?tab=rules', '/prune?tab=history'];
 
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--no-sandbox'] });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();

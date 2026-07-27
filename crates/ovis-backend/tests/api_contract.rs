@@ -220,6 +220,7 @@ async fn harness_with(mut configure: impl FnMut(&mut ServerConfig)) -> Option<Ha
         .await
         .expect("test database");
     reseed(&db).await;
+    let prune_enabled = ovis_core::db::prune::ensure_tables(&db).await;
 
     let os = OsClient::new(&cfg.opensearch_url, None, None).unwrap();
     let runtime = RuntimeMeta {
@@ -246,6 +247,7 @@ async fn harness_with(mut configure: impl FnMut(&mut ServerConfig)) -> Option<Ha
         cfg,
         build: BuildInfo::current(),
         pending_deletes_enabled: false,
+        prune: ovis_backend::state::PruneHandle::new(prune_enabled),
         metrics: None,
     };
 
@@ -286,6 +288,23 @@ async fn reseed(pool: &sqlx::PgPool) {
         .execute(pool)
         .await
         .expect("seeding");
+
+    // OVIS-owned prune state: clear it too (child tables before their FK
+    // parents), then re-run the idempotent bootstrap so the starter rules are
+    // back for every test.
+    for table in [
+        "prune_audit",
+        "prune_candidate",
+        "prune_scan",
+        "prune_exclusions",
+        "prune_rules",
+    ] {
+        // The tables may not exist yet on a fresh test database.
+        let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))
+            .execute(pool)
+            .await;
+    }
+    ovis_core::db::prune::ensure_tables(pool).await;
 }
 
 fn skip(test: &str) {

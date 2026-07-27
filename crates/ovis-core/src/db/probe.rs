@@ -123,6 +123,7 @@ pub const EXPECTED_OVIS_INDEXES: &[&str] = &[
     "ix_ovis_document_id_trgm",
     "ix_ovis_dcc_by_doc",
     "ix_ovis_document_tag_by_tag",
+    "ix_ovis_document_content_hash",
 ];
 
 #[derive(Debug, Clone, Default, PartialEq)]

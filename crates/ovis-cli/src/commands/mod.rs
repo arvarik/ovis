@@ -10,14 +10,15 @@ pub mod completions;
 pub mod config_cmd;
 pub mod connector;
 pub mod page;
+pub mod prune;
 pub mod search;
 pub mod server;
 pub mod stats;
 pub mod status;
 
-use crate::cli::{Cli, Command, ConnectorCommand, PageCommand};
+use crate::cli::{Cli, Command, ConnectorCommand, PageCommand, PruneCommand};
 use crate::ctx::Ctx;
-use crate::error::{CliError, CliResult};
+use crate::error::CliResult;
 
 pub async fn dispatch(cli: &Cli) -> CliResult<()> {
     let ctx = Ctx::build(&cli.globals)?;
@@ -33,11 +34,31 @@ pub async fn dispatch(cli: &Cli) -> CliResult<()> {
         Command::Config { action } => config_cmd::run(&ctx, action),
         Command::Completions { shell } => completions::run(&ctx, *shell),
         Command::ConnectorNames => connector::names(&ctx).await,
-        Command::Prune => Err(CliError::Usage(
-            "pruning is deferred: the engine and its UX are out of scope for now, so \
-             `ovis prune` is not wired to anything rather than pretending to work."
-                .into(),
-        )),
+        Command::Prune { action } => prune_command(&ctx, action).await,
+    }
+}
+
+async fn prune_command(ctx: &Ctx, action: &PruneCommand) -> CliResult<()> {
+    match action {
+        PruneCommand::Scan(args) => prune::scan(ctx, args).await,
+        PruneCommand::Scans { limit, page } => prune::scans(ctx, *limit, *page).await,
+        PruneCommand::Ls(args) => prune::ls(ctx, args).await,
+        PruneCommand::Show { id } => prune::show(ctx, id).await,
+        PruneCommand::Dismiss { ids, forever } => prune::dismiss(ctx, ids, *forever).await,
+        PruneCommand::Stage(args) => prune::stage(ctx, args).await,
+        PruneCommand::Staged { limit, page } => prune::staged(ctx, *limit, *page).await,
+        PruneCommand::Restore { ids, all_staged } => prune::restore(ctx, ids, *all_staged).await,
+        PruneCommand::Delete(args) => prune::delete(ctx, args).await,
+        PruneCommand::Status => prune::status(ctx).await,
+        PruneCommand::Log {
+            since,
+            action,
+            limit,
+            page,
+        } => prune::log(ctx, since.as_deref(), action.as_deref(), *limit, *page).await,
+        PruneCommand::Rules { action } => prune::rules(ctx, action).await,
+        PruneCommand::Config { action } => prune::config(ctx, action).await,
+        PruneCommand::Exclusions { limit, page } => prune::exclusions(ctx, *limit, *page).await,
     }
 }
 

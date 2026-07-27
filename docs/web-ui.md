@@ -6,7 +6,7 @@ everywhere: what the API states as uncertain or risky renders as exactly that.
 
 ![The Explorer](./screenshots/explorer.jpg)
 
-## The five views
+## The six views
 
 ### Pages — the Explorer (`/pages`)
 
@@ -84,6 +84,34 @@ gauge with the OpenSearch read-only alarm state, and a runtime card whose
 every value is live from the API — nothing hardcoded.
 
 ![Stats](./screenshots/stats.jpg)
+
+### Prune (`/prune`)
+
+Review-first junk removal — the full guide is [pruning.md](./pruning.md).
+Four tabs under an always-visible status strip (candidates open · staged with
+the soonest grace countdown · deleted this week · reaper state, which turns
+rose when halted and gold when deferring):
+
+- **Review** — the scan launcher (scope picker, detector checklist, one "Dry
+  scan" button that cannot mutate; progress renders live and survives
+  restarts), then the candidate list: reason chips (`dup 94%`, `lang deu
+  0.98`, `rule: calendar-pages`, `stub`), the confidence as a number, recrawl
+  badges, filters and bulk selection. The detail drawer puts the evidence
+  first — duplicate candidates show both documents side by side with the
+  keeper labeled.
+- **Staged** — the waiting room: live countdowns, Restore (instant, exact, no
+  confirmation) and "Delete sooner…" (still reaper-executed). Staged
+  documents are hidden from Onyx search but fully intact; they delete
+  automatically when their grace ends.
+- **Rules** — URL/tag pattern CRUD with a live-data **Preview**; the enable
+  switch waits until a rule has been previewed. Detector config exports and
+  imports as YAML.
+- **History** — the audit trail, filterable, with per-batch outcomes
+  (`chunks_deleted`, any `index cleanup pending`) rendered honestly.
+
+Staging over the server's big-batch limit requires typing the count into the
+confirmation, and every bulk action sends `confirm_count` — if the set
+changed on the server, nothing happens and the fresh count is shown.
 
 ## Keyboard
 
