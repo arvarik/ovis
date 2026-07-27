@@ -21,7 +21,13 @@ export interface PruneConfirmProps {
   chunkSum: number;
   /** Whether chunkSum covers every selected row or only the loaded page. */
   chunkSumComplete: boolean;
-  riskyCount: number;
+  /**
+   * Documents in the selection whose connector is still crawling. `null`
+   * while the server is still counting — the dialog says so rather than
+   * claiming zero, which for a filtered selection would be a claim about the
+   * loaded page dressed up as a claim about the whole set.
+   */
+  riskyCount: number | null;
   bigBatch: number;
   graceDays: number;
   /** What this action leads to, e.g. "They stay restorable until the grace ends." */
@@ -67,10 +73,13 @@ export function PruneConfirmDialog(props: PruneConfirmProps) {
       <div className="space-y-3 text-body text-ink">
         <ul className="space-y-1 text-label text-ink-mute">
           <li>
-            {chunkSumComplete ? `${formatCount(chunkSum)} chunks` : `at least ${formatCount(chunkSum)} chunks (loaded rows)`}{' '}
-            in the search index
+            {chunkSumComplete
+              ? `${formatCount(chunkSum)} chunk${chunkSum === 1 ? '' : 's'} in the search index`
+              : `${formatCount(chunkSum)} chunks across the rows loaded so far — the full selection holds more`}
           </li>
-          {riskyCount > 0 ? (
+          {riskyCount === null ? (
+            <li>counting how many are at recrawl risk…</li>
+          ) : riskyCount > 0 ? (
             <li className="text-gold">
               {formatCount(riskyCount)} belong to connectors that are still crawling — a deleted
               copy will likely be re-crawled at the next refresh
@@ -91,13 +100,15 @@ export function PruneConfirmDialog(props: PruneConfirmProps) {
               This is more than {formatCount(bigBatch)} documents. Type the count ({total}) to
               continue:
             </label>
+            {/* No placeholder: the ceremony is reading the number above and
+                typing it deliberately, which a pre-filled-looking field
+                would undo. */}
             <Input
               id="prune-confirm-count"
               value={typed}
               onChange={(event) => setTyped(event.target.value)}
               inputMode="numeric"
               autoComplete="off"
-              placeholder={String(total)}
             />
           </div>
         ) : null}

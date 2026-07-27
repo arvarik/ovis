@@ -108,8 +108,19 @@ export function ReviewTab() {
   const dismiss = usePruneDismiss();
   const connectorOptions = useConnectorOptions();
 
+  // The risk breakdown for a *filtered* bulk action is a claim about the whole
+  // selection, so it has to come from the server — counting the loaded page
+  // would report "none at risk" for a set that holds thousands.
+  const riskyTotal = useQuery({
+    ...pruneCandidatesQuery({ ...params, recrawl_risk: true, limit: 1, page: 1 }),
+    enabled: confirming === 'stage-filtered',
+    select: (data) => data.total,
+  });
+
   const clearSelection = () => setSelected(new Set());
   const limits = status.data?.limits;
+  const filtersActive =
+    detector !== '' || connectorId !== '' || riskyOnly || minConfidence > 0;
 
   return (
     <div className="space-y-4">
@@ -173,8 +184,12 @@ export function ReviewTab() {
         ) : items.length === 0 ? (
           <EmptyState
             icon={<SearchCheck aria-hidden />}
-            title="No candidates to review"
-            description="Run a scan to find some. A scan is a preview — nothing is hidden or deleted."
+            title={filtersActive ? 'No candidates match these filters' : 'No candidates to review'}
+            description={
+              filtersActive
+                ? 'Widen the filters, or scan a different scope.'
+                : 'Run a scan to find some. A scan is a preview — nothing is hidden or deleted.'
+            }
           />
         ) : (
           <>
@@ -193,7 +208,12 @@ export function ReviewTab() {
               </span>
               {selectedItems.length > 0 ? (
                 <span className="flex items-center gap-2">
-                  <Button size="sm" variant="primary" onClick={() => setConfirming('stage-selected')}>
+                  <Button
+                    size="sm"
+                    variant="primary"
+                    disabled={!limits}
+                    onClick={() => setConfirming('stage-selected')}
+                  >
                     Stage selected
                   </Button>
                   <label className="flex items-center gap-1.5">
@@ -214,7 +234,12 @@ export function ReviewTab() {
                   </Button>
                 </span>
               ) : candidates.data.total > items.length ? (
-                <Button size="sm" className="ml-auto" onClick={() => setConfirming('stage-filtered')}>
+                <Button
+                  size="sm"
+                  className="ml-auto"
+                  disabled={!limits}
+                  onClick={() => setConfirming('stage-filtered')}
+                >
                   Stage all {formatCount(candidates.data.total)} matching…
                 </Button>
               ) : null}
@@ -269,6 +294,8 @@ export function ReviewTab() {
             chunkSum={sumChunks(selectedItems)}
             chunkSumComplete
             riskyCount={selectedItems.filter((i) => i.recrawl_risk).length}
+            // Explicit ids: every selected row is in hand, so both numbers
+            // above cover the whole selection.
             bigBatch={limits.big_batch}
             graceDays={limits.grace_days}
             consequence="Staged documents are hidden from Onyx search but fully intact; they delete automatically when their grace ends. Restore lives in the Staged tab."
@@ -293,7 +320,7 @@ export function ReviewTab() {
             total={candidates.data.total}
             chunkSum={sumChunks(items)}
             chunkSumComplete={items.length >= candidates.data.total}
-            riskyCount={items.filter((i) => i.recrawl_risk).length}
+            riskyCount={riskyTotal.data ?? null}
             bigBatch={limits.big_batch}
             graceDays={limits.grace_days}
             consequence="This stages every candidate matching the current filters — the server re-checks the count and refuses if the set changed. Staged documents are hidden from search, data intact, restorable until their grace ends."

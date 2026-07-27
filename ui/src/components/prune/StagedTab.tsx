@@ -91,7 +91,12 @@ export function StagedTab() {
                   >
                     Restore selected
                   </Button>
-                  <Button size="sm" variant="destructive" onClick={() => setConfirmingDelete(true)}>
+                  <Button
+                    size="sm"
+                    variant="destructive"
+                    disabled={!limits}
+                    onClick={() => setConfirmingDelete(true)}
+                  >
                     Delete sooner…
                   </Button>
                 </span>

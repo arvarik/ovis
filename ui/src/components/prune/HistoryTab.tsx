@@ -162,7 +162,7 @@ function AuditRow({ entry }: { entry: PruneAuditItem }) {
       <Badge tone={actionTone(entry.action)}>{entry.action.replaceAll('_', ' ')}</Badge>
       <span className="text-caption text-ink-mute">{entry.actor}</span>
       <span className="min-w-0 flex-1 truncate font-mono text-caption text-ink-mute">
-        {entry.document_id ?? (entry.scan_id !== null ? `scan ${entry.scan_id}` : '')}
+        {entry.document_id ?? (entry.scan_id !== null ? `#${entry.scan_id}` : '')}
       </span>
       {cleanupPending ? <Badge tone="gold">index cleanup pending</Badge> : null}
       {summary ? <span className="w-full pl-24 text-caption text-ink-faint md:w-auto md:pl-0">{summary}</span> : null}

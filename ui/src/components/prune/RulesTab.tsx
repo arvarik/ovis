@@ -184,7 +184,9 @@ function PreviewDialog({
               <p className="text-label text-ink">
                 {result.complete
                   ? `${formatCount(result.matched)} matched of ${formatCount(result.scanned)} scanned`
-                  : `at least ${formatCount(result.matched)} matched in the first ${formatCount(result.scanned)} scanned — a full scan covers everything`}
+                  : result.matched === 0
+                    ? `no matches in the first ${formatCount(result.scanned)} documents (id order) — a full scan covers everything`
+                    : `at least ${formatCount(result.matched)} matched in the first ${formatCount(result.scanned)} documents (id order) — a full scan covers everything`}
               </p>
               {result.sample.length > 0 ? (
                 <ul className="max-h-64 space-y-1 overflow-y-auto rounded-lg border border-line p-2">
@@ -195,9 +197,7 @@ function PreviewDialog({
                     </li>
                   ))}
                 </ul>
-              ) : (
-                <p className="text-label text-ink-mute">no matches in the sampled rows</p>
-              )}
+              ) : null}
             </div>
           ) : null}
         </div>

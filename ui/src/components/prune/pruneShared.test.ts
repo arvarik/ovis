@@ -59,6 +59,21 @@ describe('needsTypedCount', () => {
   });
 });
 
+describe('bulk-confirmation honesty', () => {
+  // Regression: the confirm dialog counted recrawl risk over the *loaded page*
+  // and printed "none are at recrawl risk" for a 207k-document filtered
+  // selection that actually held 3,494. A filtered selection's risk count now
+  // comes from the server, and `null` renders as "counting…", never as zero.
+  const riskLine = (riskyCount: number | null) =>
+    riskyCount === null ? 'counting' : riskyCount > 0 ? 'at-risk' : 'none';
+
+  it('never reports "none at risk" while the true count is unknown', () => {
+    expect(riskLine(null)).toBe('counting');
+    expect(riskLine(0)).toBe('none');
+    expect(riskLine(3494)).toBe('at-risk');
+  });
+});
+
 describe('chunkLabel', () => {
   it('null means "not counted yet", never 0', () => {
     expect(chunkLabel(null)).toBe('—');

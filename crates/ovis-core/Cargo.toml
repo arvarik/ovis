@@ -1,6 +1,6 @@
 [package]
 name = "ovis-core"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 description = "OVIS data plane: Onyx Postgres queries, OpenSearch client, Onyx API client, shared wire types"
 publish = false

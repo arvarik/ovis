@@ -214,6 +214,7 @@ function CandidateBody({ detail, onClose }: { detail: PruneCandidateDetail; onCl
                 <Button
                   className="flex-1"
                   variant="primary"
+                  disabled={!limits}
                   onClick={() => setConfirming('stage')}
                 >
                   Stage
@@ -232,6 +233,7 @@ function CandidateBody({ detail, onClose }: { detail: PruneCandidateDetail; onCl
               <Button
                 className="flex-1"
                 variant="destructive"
+                disabled={!limits}
                 onClick={() => setConfirming('delete')}
               >
                 Delete sooner…
