@@ -66,15 +66,10 @@ ui/scripts/shots/
 *.log
 !ops/*.log
 
-# Pre-redesign design documents. Superseded by redesign/ in full; kept locally
-# for archaeology, never pushed. (Also purged from git history before the
-# remote existed.)
+# Internal design archives and process artifacts: kept locally, never pushed.
+# (Both were also purged from git history before the remote existed.)
 implementation/
-
-# Obsidian's per-machine pane/tab state, which changes every time the vault is
-# opened. The shared vault settings (app/appearance/core-plugins) stay tracked.
-redesign/.obsidian/workspace.json
-redesign/.obsidian/workspace-mobile.json
+redesign/
 
 # ---------------------------------------------------------------------------
 # Editors and operating systems

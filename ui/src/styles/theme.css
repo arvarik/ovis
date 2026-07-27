@@ -1,4 +1,4 @@
-/* Obsidian Atelier — the OVIS design system (redesign/frontend/01_DESIGN_SYSTEM.md).
+/* Obsidian Atelier — the OVIS design system.
  *
  * Single source of truth for color. The default Tailwind palette is wiped
  * (--color-*: initial) so a stray `bg-gray-800` produces no CSS at all;

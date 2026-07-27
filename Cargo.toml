@@ -8,6 +8,10 @@ members = [
     "crates/ovis-prune",
 ]
 
+[workspace.package]
+license = "Apache-2.0"
+repository = "https://github.com/arvarik/ovis"
+
 [workspace.dependencies]
 # --- runtime / async ---
 tokio = { version = "1.47", features = ["full"] }

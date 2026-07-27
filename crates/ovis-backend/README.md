@@ -2,11 +2,9 @@
 
 The OVIS HTTP API, and the only process in the system that holds credentials.
 
-Redesign pillar **P1**: the backend is the single data plane. The CLI and the UI
-both speak this API over HTTP; neither has a database password. Design in
-[`redesign/backend/`](../../redesign/backend/), and
-[`05_AS_BUILT.md`](../../redesign/backend/05_AS_BUILT.md) for where the shipped
-code deviates from it.
+**The backend is the single data plane.** The CLI and the UI both speak this
+API over HTTP; neither has a database password. The architecture is documented
+in [`docs/architecture.md`](../../docs/architecture.md).
 
 ## Running it
 
@@ -50,9 +48,8 @@ handler carries no query text.
 
 ## The shape of the API
 
-`/api/v1`, JSON except for SSE and `…/text`. The full surface is in
-[`03_API_SURFACE.md`](../../redesign/backend/03_API_SURFACE.md); the root
-[README](../../README.md#the-api) lists every route.
+`/api/v1`, JSON except for SSE and `…/text`. The full surface is documented in
+[`docs/api.md`](../../docs/api.md).
 
 Three properties worth knowing before you call it:
 

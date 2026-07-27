@@ -2,9 +2,8 @@
 
 OVIS is a Rust workspace serving one HTTP API, with a React UI embedded in the
 binary and a CLI that speaks the same API. It was rebuilt in 2026 from a
-verified audit of its predecessor; the full design record lives in
-[`redesign/`](../redesign/), and each track's `05_AS_BUILT.md` documents where
-the shipped code deviates from the design and why.
+verified audit of its predecessor, and every design decision below was checked
+against a live deployment rather than assumed.
 
 ## One data plane
 
@@ -51,12 +50,12 @@ Responsibilities are split by what each store is good at:
 | `ovis-backend` | Axum HTTP/SSE server, background tasks, and the embedded UI (`rust-embed`) |
 | `ovis-cli` | `ovis` — CLI + ratatui TUI; an API client holding no credentials |
 | `ovis-bench` | The performance acceptance gate |
-| `ovis-prune` | Deduplication/pruning engine — deliberately untouched by the redesign |
+| `ovis-prune` | Deduplication/pruning engine — its rework is deferred; nothing depends on it |
 | `ui/` | React 19 + TypeScript + Tailwind v4, compiled by Vite, embedded at build time |
 
 ## Design principles (the ones that shape behaviour)
 
-These are the redesign's pillars, and they are enforced, not aspirational:
+These are the project's pillars, and they are enforced, not aspirational:
 
 1. **Honest failures.** A database error is a 5xx with a stable machine code —
    never an empty 200. No surface fabricates data; there are no sample-data

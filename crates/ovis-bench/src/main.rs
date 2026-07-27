@@ -1,8 +1,8 @@
 //! `ovis-bench` — the performance acceptance gate.
 //!
-//! Hits a running OVIS server with the budget matrix from
-//! `redesign/backend/01_ARCHITECTURE.md` §9 and prints a pass/fail table. Exits
-//! non-zero if any gate fails, so it can sit in CI or a release check.
+//! Hits a running OVIS server with the performance budget matrix (documented
+//! in `docs/operations.md`) and prints a pass/fail table. Exits non-zero if
+//! any gate fails, so it can sit in CI or a release check.
 //!
 //! ```text
 //! ovis-bench --url http://gamma:8080 --iterations 50

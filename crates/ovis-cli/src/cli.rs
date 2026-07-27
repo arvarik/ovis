@@ -1,4 +1,4 @@
-//! The command tree, per `redesign/cli/01_COMMAND_TREE.md`.
+//! The command tree.
 //!
 //! Every global flag is `global = true`. The old definition declared them on the
 //! root only, so `ovis page list --format json` — an example from its own

@@ -1,9 +1,7 @@
 # HTTP API
 
 Base path `/api/v1`. JSON everywhere except SSE (`/pages/stream`) and
-`/pages/{id}/text` (plain text). The historical specification is
-[`redesign/backend/03_API_SURFACE.md`](../redesign/backend/03_API_SURFACE.md);
-this page documents the API as shipped.
+`/pages/{id}/text` (plain text). This page documents the API as shipped.
 
 ## Conventions
 

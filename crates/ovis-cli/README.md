@@ -4,10 +4,8 @@
 
 **It is an API client.** It speaks the OVIS HTTP API and holds no database or
 OpenSearch credentials; `ovis-core`'s `db` and `search` modules are the
-*backend's* data plane and are unreachable from here. Design in
-[`redesign/cli/`](../../redesign/cli/), and
-[`05_AS_BUILT.md`](../../redesign/cli/05_AS_BUILT.md) for where the shipped code
-deviates from it.
+*backend's* data plane and are unreachable from here. The user guide is
+[`docs/cli.md`](../../docs/cli.md).
 
 ## The hot path
 

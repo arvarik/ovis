@@ -1,5 +1,5 @@
 //! The TUI palette, mirroring the CLI's semantic tones and the web UI's
-//! emerald-obsidian identity (redesign pillar P6).
+//! emerald-obsidian identity.
 
 use ratatui::style::Color;
 

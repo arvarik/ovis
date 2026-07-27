@@ -4,6 +4,8 @@ version = "0.2.0"
 edition = "2021"
 description = "Axum REST & SSE API server for OVIS"
 publish = false
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 ovis-core = { path = "../ovis-core" }

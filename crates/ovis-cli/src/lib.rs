@@ -1,7 +1,7 @@
 //! `ovis` — the OVIS command line and terminal UI.
 //!
 //! The CLI is an **API client**. It speaks the OVIS HTTP API and holds no
-//! database or OpenSearch credentials (redesign pillar P1); `ovis-core`'s
+//! database or OpenSearch credentials; `ovis-core`'s
 //! `db`/`search` modules are the backend's data plane and are deliberately
 //! unreachable from here. Only `ovis server start`, which embeds the backend in
 //! this same binary, and `ovis server setup-onyx-key`, which is server-side

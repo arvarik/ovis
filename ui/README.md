@@ -1,10 +1,8 @@
 # `ui/`
 
 The OVIS web dashboard — React 19 + TypeScript + Tailwind v4, built by Vite and
-embedded into the backend binary by `rust-embed`. Design in
-[`redesign/frontend/`](../redesign/frontend/), and
-[`05_AS_BUILT.md`](../redesign/frontend/05_AS_BUILT.md) for where the shipped
-code deviates from it.
+embedded into the backend binary by `rust-embed`. The user guide is
+[`docs/web-ui.md`](../docs/web-ui.md).
 
 **It is an API client.** Everything it shows comes from `/api/v1`; nothing is
 hardcoded, fabricated, or smoothed over. The API's honest fields —

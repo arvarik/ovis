@@ -125,6 +125,4 @@ block, watch the Stats disk gauge afterwards.
 ## Still stuck
 
 Grep the server log for the response's `req_id`, then open an issue with the
-log lines, the request, and `ovis status -o json` output. The design archive
-([`redesign/`](../redesign/)) documents intended behaviour in detail —
-especially each track's `05_AS_BUILT.md`.
+log lines, the request, and `ovis status -o json` output.

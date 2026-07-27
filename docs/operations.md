@@ -142,6 +142,7 @@ list path is ~965 ms instead of sub-millisecond. Re-check via
 2. After an **Onyx** upgrade: check `/system/health` for schema drift and
    `missing_indexes`; refresh the test fixture if developing
    (`scripts/capture-onyx-schema.sh <host> > tests/fixtures/onyx_schema.sql`).
-3. The Postgres password on the reference deployment was rotated 2026-07-26;
-   the procedure and fallout notes live in
-   [`redesign/backend/05_AS_BUILT.md`](../redesign/backend/05_AS_BUILT.md) §5.
+3. When rotating the Onyx Postgres password, update every consumer (Onyx's own
+   services, workers, and OVIS) and restart them together — and expect worker
+   restarts to orphan in-flight index attempts as zombies that must be cleared
+   before their cc-pairs can crawl again.

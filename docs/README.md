@@ -13,12 +13,5 @@ Everything needed to run, use, operate, and hack on OVIS.
 | [Troubleshooting](./troubleshooting.md) | Symptom → cause → fix, for everything we have actually seen go wrong |
 | [Development](./development.md) | Building, testing (unit / DB-backed / live smoke / bench), UI workflow, quality gates |
 
-Two more places worth knowing about:
-
-- [`redesign/`](../redesign/) — the full design archive: audits of the code this
-  replaced, the specifications, and per-track `05_AS_BUILT.md` documents
-  recording exactly where the shipped code deviates from the designs and why.
-  The documentation you are reading describes *what is*; `redesign/` preserves
-  *why it is that way*.
-- [`.env.example`](../.env.example) — the authoritative, annotated list of
-  every configuration setting.
+One more place worth knowing about: [`.env.example`](../.env.example) — the
+authoritative, annotated list of every configuration setting.

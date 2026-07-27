@@ -2,25 +2,27 @@
 
 # 🐏 OVIS
 
-**See everything your Onyx deployment crawled. Then act on it.**
+**See everything your Onyx deployment crawled**
 
-*Onyx Visibility — a single-binary observability and control plane for
-[Onyx](https://github.com/onyx-dot-app/onyx) (formerly Danswer) page stores.*
+*A single-binary observability and control plane for
+[Onyx](https://github.com/onyx-dot-app/onyx) page stores*
+
+[![Docker](https://github.com/arvarik/ovis/actions/workflows/docker.yml/badge.svg)](https://github.com/arvarik/ovis/actions/workflows/docker.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![GHCR](https://img.shields.io/badge/ghcr.io-arvarik%2Fovis-2ea44f?logo=docker&logoColor=white)](https://github.com/arvarik/ovis/pkgs/container/ovis)
 
 </div>
 
 ![The OVIS Explorer browsing 1.7M crawled pages](docs/screenshots/explorer.jpg)
 
-Onyx crawls and answers questions brilliantly — but its raw page store is
+Onyx crawls and answers, but its raw page store is
 effectively invisible. You can't easily see what it holds, why a connector
 stopped, whether that delete actually stuck, or what a document really looks
-like inside the index. **OVIS is that view, plus the controls to act on it**:
+like inside the index. 
+
+**OVIS** is
 a fast web dashboard, a scriptable CLI, and an honest HTTP API, all shipped as
 one Rust binary.
-
-Built and battle-tested against a real deployment: **1.7 million documents,
-10 million chunks (375 GB), 332 connectors** — and designed so the default
-page still renders in ~10 milliseconds at that scale.
 
 ## Why OVIS
 
@@ -51,7 +53,7 @@ page still renders in ~10 milliseconds at that scale.
 - 📦 **One file to deploy.** The React UI is compiled into the Rust binary.
   Docker image or a single executable; your pick.
 
-## A tour
+## Screenshots
 
 | | |
 |---|---|
@@ -149,22 +151,6 @@ the free-tier PAT fallback for Onyx's paywalled API keys — is in
 | 🩺 [Troubleshooting](docs/troubleshooting.md) | Symptom → cause → fix |
 | 🛠️ [Development](docs/development.md) | Building, the test pyramid, UI workflow, quality gates |
 
-The [`redesign/`](redesign/) folder preserves the full design record — the
-audits, the specifications, and `05_AS_BUILT.md` documents recording every
-place the shipped code deviates from the design and why.
-
-## Measured, not promised
-
-At 1.7 M documents, over a LAN, gated by `ovis-bench`:
-
-| | Budget | Measured |
-|---|---|---|
-| List page p50 | < 15 ms | **10.5 ms** |
-| Content search p99 | < 150 ms | ✓ |
-| SSE first byte | < 30 ms | **0.8 ms** |
-| UI initial JS (gz) | ≤ 220 kB | **204 kB** |
-| UI accessibility | WCAG 2.1 AA | **0 axe violations** |
-
 ## Project structure
 
 ```
@@ -173,12 +159,13 @@ crates/ovis-backend    Axum HTTP/SSE server + embedded UI
 crates/ovis-cli        `ovis` — CLI + TUI (pure API client)
 crates/ovis-bench      the performance gate
 ui/                    React 19 + Tailwind v4 dashboard
-docs/                  the guides above · redesign/  the design archive
+docs/                  the guides above
 ```
 
----
+## License
+
+[Apache-2.0](LICENSE).
 
 OVIS is independent tooling built alongside — not part of —
 [Onyx](https://github.com/onyx-dot-app/onyx). It reads Onyx's stores
-respectfully, performs actions only through Onyx's own API, and treats the
-things it cannot know as things to say out loud.
+respectfully and performs actions only through Onyx's own API.

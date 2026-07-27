@@ -3,7 +3,7 @@
 -- ============================================================================
 --
 -- These indexes are what make the OVIS list/search path meet its performance
--- budgets (see redesign/backend/01_ARCHITECTURE.md §9). They are additive and
+-- budgets (see docs/operations.md). They are additive and
 -- read-only in effect: no Onyx table is altered, no data is written.
 --
 -- OVIS NEVER APPLIES THIS FILE AUTOMATICALLY. Onyx owns this database; we do
@@ -21,7 +21,7 @@
 --
 -- Measured on gamma (2026-07-26, 1,652,044 rows in public.document):
 --   before: default list page = 965 ms  (parallel seq scan + 150 MB external merge sort)
---   after:  see redesign/backend/04_IMPLEMENTATION_PLAN.md §5 acceptance run
+--   after:  0.6 ms (index-served; the full acceptance run is gated by ovis-bench)
 --
 -- Expected total size: ~1-2 GB (the two GIN trigram indexes dominate).
 -- All of it is reversible: DROP INDEX CONCURRENTLY <name>;  (see bottom of file)

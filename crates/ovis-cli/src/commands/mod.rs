@@ -34,9 +34,8 @@ pub async fn dispatch(cli: &Cli) -> CliResult<()> {
         Command::Completions { shell } => completions::run(&ctx, *shell),
         Command::ConnectorNames => connector::names(&ctx).await,
         Command::Prune => Err(CliError::Usage(
-            "pruning is deferred: the engine and its UX are out of scope for this redesign, so \
-             `ovis prune` is not wired to anything rather than pretending to work. See \
-             redesign/README.md."
+            "pruning is deferred: the engine and its UX are out of scope for now, so \
+             `ovis prune` is not wired to anything rather than pretending to work."
                 .into(),
         )),
     }

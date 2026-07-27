@@ -6,9 +6,8 @@
 //!    0, including the ones that fell back to baked-in sample data. Here a
 //!    failure is an [`CliError`] with a non-zero exit code, and there is no
 //!    fallback data to fall back to.
-//! 2. **The exit code says which kind of failure it was**, per
-//!    `redesign/cli/01_COMMAND_TREE.md` §6, so a script can branch without
-//!    parsing English.
+//! 2. **The exit code says which kind of failure it was** (the table lives in
+//!    `docs/cli.md`), so a script can branch without parsing English.
 
 use std::fmt;
 

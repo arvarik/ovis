@@ -8,10 +8,9 @@ crates/
 ├── ovis-backend/    Axum server, SSE, background tasks, embedded UI (assets.rs)
 ├── ovis-cli/        the `ovis` binary — CLI + TUI, pure API client
 ├── ovis-bench/      performance acceptance gates
-└── ovis-prune/      dedup/prune engine (untouched by the redesign; its rework is deferred)
+└── ovis-prune/      dedup/prune engine (its rework is deferred; nothing depends on it)
 ui/                  React 19 + TS + Tailwind v4 (see ui/README.md)
 docs/                this documentation
-redesign/            the design archive: audits, specs, and per-track AS_BUILT records
 ops/                 onyx_indexes.sql — the Postgres support indexes
 scripts/             test-db.sh · onyx-token.sh · capture-onyx-schema.sh
 tests/fixtures/      captured Onyx schema + regression-shaped seed data
@@ -99,16 +98,19 @@ There is no CI in this repository yet; these run locally.
 
 ## Ground rules
 
-The redesign's non-negotiables, which patches should keep:
+The project's non-negotiables, which patches should keep:
 
 - **No fabricated data, ever.** No sample fallbacks, no fake success, no
   invented numbers. A failure is an error the user can see.
 - **Honest fields flow through.** If the API states uncertainty
   (`total_exact`, `chunk_count: null`, `degraded`, …), surfaces render it.
-- **Landmines** (documented in [`redesign/README.md`](../redesign/README.md)
-  §4): direct Postgres only, never clobber the resilience-cron sentinels, no
-  blanket crawl triggers, derive doc counts from `document_by_…_pair`, judge
-  liveness by heartbeat, discover the index name — never hardcode it.
-- When reality contradicts a design doc, do what is right and **record it** in
-  the relevant `05_AS_BUILT.md` — that is how every deviation in this repo is
-  already handled.
+- **Landmines.** Connect to Postgres directly, never through pgbouncer. Never
+  clobber the resilience-cron park sentinels in `index_attempt.error_msg`. No
+  blanket crawl triggers — crawl kicks go one cc-pair at a time. Derive doc
+  counts from `document_by_connector_credential_pair`, never from Onyx's
+  `total_docs_indexed`. Judge liveness by heartbeat staleness, never by
+  document counts. Discover the index name from `search_settings` — never
+  hardcode it, and never use the `danswer_chunk*` wildcard.
+- When reality contradicts documentation, do what is right and **update the
+  docs in the same change** — every behavioural claim in `docs/` is meant to
+  stay true.

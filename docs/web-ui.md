@@ -125,5 +125,4 @@ home screen — the manifest makes it a standalone dark app.
   the server confirmed deleted.
 
 Developer workflow (building, checks, the screenshot/axe drivers):
-[`ui/README.md`](../ui/README.md). Design history and deviations:
-[`redesign/frontend/`](../redesign/frontend/).
+[`ui/README.md`](../ui/README.md).
