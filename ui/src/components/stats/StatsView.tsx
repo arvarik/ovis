@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { useQuery } from '@tanstack/react-query';
+import { useQueries, useQuery } from '@tanstack/react-query';
 import {
   Area,
   AreaChart,
@@ -16,13 +16,15 @@ import {
 import {
   healthQuery,
   overviewQuery,
+  presetCountQuery,
   runtimeQuery,
   sourcesQuery,
+  tagsQuery,
   timelineQuery,
   topConnectorsQuery,
 } from '@/api/queries';
 import { cn } from '@/lib/cn';
-import { absolute, bytes, compact, count as formatCount, sourceLabel } from '@/lib/format';
+import { absolute, bytes, compact, count as formatCount, relative, sourceLabel } from '@/lib/format';
 import { Card } from '@/components/primitives/Card';
 import { ErrorState } from '@/components/primitives/EmptyState';
 import { Skeleton } from '@/components/primitives/Skeleton';
@@ -208,13 +210,250 @@ function SourcesCard() {
   );
 }
 
+/**
+ * Corpus composition: the server-side preset totals as global truths, each
+ * linking to the Explorer view that shows exactly those documents.
+ */
+function CompositionCard() {
+  const slices = useQueries({
+    queries: [
+      presetCountQuery({ chunk_min: 0, chunk_max: 0 }),
+      presetCountQuery({ chunk_min: 11 }),
+      presetCountQuery({ hidden: true }),
+    ],
+  });
+  const [stubs, heavy, hidden] = slices;
+  const rows: Array<{
+    label: string;
+    hint: string;
+    query: (typeof slices)[number] | undefined;
+    search: Record<string, unknown>;
+  }> = [
+    { label: 'Stubs', hint: '0 chunks — crawled, nothing extracted', query: stubs, search: { chunk_min: 0, chunk_max: 0 } },
+    { label: 'Heavy', hint: '11+ chunks', query: heavy, search: { chunk_min: 11 } },
+    { label: 'Hidden', hint: 'excluded from Onyx search, data kept', query: hidden, search: { hidden: true } },
+  ];
+  return (
+    <Card>
+      <h2 className="mb-3 text-label font-medium text-ink-faint">Corpus composition</h2>
+      <ul className="space-y-1">
+        {rows.map((row) => (
+          <li key={row.label}>
+            <Link
+              to="/pages"
+              search={row.search}
+              className="group flex items-baseline gap-2 rounded-lg px-1.5 py-1.5 transition-colors hover:bg-hover"
+            >
+              <span className="w-16 shrink-0 text-label text-ink-mute group-hover:text-ink">
+                {row.label}
+              </span>
+              <span className="stat-numeral text-title text-ink">
+                {row.query?.data
+                  ? `${row.query.data.exact ? '' : '~'}${formatCount(row.query.data.total)}`
+                  : '…'}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-right font-mono text-caption text-ink-faint">
+                {row.hint}
+              </span>
+            </Link>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-2 font-mono text-caption text-ink-faint">
+        counts are live server totals — tap a row to see the documents
+      </p>
+    </Card>
+  );
+}
+
+/** What the crawlers did lately — the stats-page summary of /activity. */
+function CrawlCard({ crawl }: { crawl: import('@/api/types').CrawlStats | undefined }) {
+  return (
+    <Card>
+      <div className="mb-3 flex items-baseline justify-between">
+        <h2 className="text-label font-medium text-ink-faint">Crawl activity</h2>
+        <Link to="/activity" className="text-caption text-teal hover:underline">
+          live view →
+        </Link>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <div className="stat-numeral text-display leading-none text-ink">
+            {crawl ? <CountUp value={crawl.docs_last_15m} /> : '…'}
+          </div>
+          <div className="mt-0.5 font-mono text-caption text-ink-faint">docs · last 15 min</div>
+        </div>
+        <div>
+          <div className="stat-numeral text-display leading-none text-ink">
+            {crawl ? <CountUp value={crawl.docs_last_24h} format={compact} /> : '…'}
+          </div>
+          <div className="mt-0.5 font-mono text-caption text-ink-faint">docs · last 24 h</div>
+        </div>
+        <div>
+          <div className="stat-numeral text-display leading-none text-mint">
+            {crawl ? formatCount(crawl.attempts_in_progress) : '…'}
+          </div>
+          <div className="mt-0.5 font-mono text-caption text-ink-faint">attempts running</div>
+        </div>
+        <div>
+          <div
+            className={cn(
+              'stat-numeral text-display leading-none',
+              crawl && crawl.attempts_stalled > 0 ? 'text-gold' : 'text-ink',
+            )}
+          >
+            {crawl ? formatCount(crawl.attempts_stalled) : '…'}
+          </div>
+          <div className="mt-0.5 font-mono text-caption text-ink-faint">stalled (no heartbeat 45 m)</div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+/** OpenSearch internals that only show up when they bite: tombstones, disk, cluster. */
+function IndexInternalsCard({ o }: { o: import('@/api/types').StatsOverview | undefined }) {
+  const idx = o?.index;
+  const avgChunks =
+    o && o.chunks !== null && o.documents > 0 ? o.chunks / o.documents : null;
+  const rows: Array<[string, React.ReactNode]> = [
+    [
+      'chunks in index',
+      idx?.docs != null ? formatCount(idx.docs) : '—',
+    ],
+    [
+      'deleted docs (tombstones)',
+      idx?.deleted_docs != null ? (
+        <span title="Deleted documents awaiting segment merge — space not yet reclaimed">
+          {formatCount(idx.deleted_docs)}
+        </span>
+      ) : (
+        '—'
+      ),
+    ],
+    ['avg chunks / document', avgChunks !== null ? avgChunks.toFixed(1) : '—'],
+    [
+      'disk free',
+      idx?.disk_available_bytes != null && idx.disk_total_bytes != null
+        ? `${bytes(idx.disk_available_bytes)} of ${bytes(idx.disk_total_bytes)}`
+        : '—',
+    ],
+    [
+      'cluster',
+      idx?.cluster_status ? (
+        <span
+          className={cn(
+            idx.cluster_status === 'green'
+              ? 'text-mint'
+              : idx.cluster_status === 'yellow'
+                ? 'text-gold'
+                : 'text-rose',
+          )}
+        >
+          {idx.cluster_status}
+        </span>
+      ) : (
+        '—'
+      ),
+    ],
+    [
+      'writes',
+      idx ? (
+        idx.read_only ? (
+          <span className="font-medium text-rose">READ-ONLY (watermark)</span>
+        ) : (
+          'accepted'
+        )
+      ) : (
+        '—'
+      ),
+    ],
+  ];
+  return (
+    <Card>
+      <h2 className="mb-3 text-label font-medium text-ink-faint">Index internals</h2>
+      <dl className="space-y-1.5">
+        {rows.map(([k, v]) => (
+          <div key={k} className="flex items-baseline justify-between gap-3">
+            <dt className="font-mono text-caption text-ink-faint">{k}</dt>
+            <dd className="text-right font-mono text-mono-sm text-ink-mute">{v}</dd>
+          </div>
+        ))}
+      </dl>
+    </Card>
+  );
+}
+
+/** Top tag facets from the 230k-tag corpus. */
+function TopTagsCard() {
+  const tags = useQuery(tagsQuery(8));
+  const items = tags.data ?? [];
+  const max = Math.max(...items.map((t) => t.doc_count), 1);
+  return (
+    <Card>
+      <h2 className="mb-3 text-label font-medium text-ink-faint">Top tags</h2>
+      {tags.isPending ? (
+        <Skeleton className="h-40 w-full rounded-lg" />
+      ) : tags.isError ? (
+        <ErrorState error={tags.error} title="Tags unavailable" onRetry={() => void tags.refetch()} />
+      ) : items.length === 0 ? (
+        <p className="text-body text-ink-mute">No tags recorded.</p>
+      ) : (
+        <ul className="space-y-1.5">
+          {items.map((t, i) => (
+            <li key={i} className="grid grid-cols-[minmax(0,1fr)_4.5rem] items-center gap-2">
+              <div className="min-w-0">
+                <div className="truncate text-label text-ink-mute" title={`${t.key}: ${t.value}`}>
+                  <span className="text-teal">{t.key}</span>
+                  <span className="text-ink-faint"> · </span>
+                  {t.value}
+                </div>
+                <div aria-hidden className="mt-1 h-1 overflow-hidden rounded-full bg-well">
+                  <span
+                    className="block h-full rounded-full bg-teal/70"
+                    style={{ width: `${Math.max((t.doc_count / max) * 100, 2)}%` }}
+                  />
+                </div>
+              </div>
+              <span className="text-right font-mono text-caption text-ink-faint">
+                {compact(t.doc_count)}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Card>
+  );
+}
+
 function TopConnectorsCard() {
-  const top = useQuery(topConnectorsQuery(10));
+  const [by, setBy] = useState<'docs' | 'recent'>('docs');
+  const top = useQuery(topConnectorsQuery(by, 10));
   const items = top.data ?? [];
   const max = Math.max(...items.map((c) => c.doc_count), 1);
   return (
     <Card className="md:col-span-2">
-      <h2 className="mb-3 text-label font-medium text-ink-faint">Top connectors by documents</h2>
+      <div className="mb-3 flex items-center justify-between gap-2">
+        <h2 className="text-label font-medium text-ink-faint">Top connectors</h2>
+        <div role="group" aria-label="Rank by" className="flex items-center gap-1">
+          {(['docs', 'recent'] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              aria-pressed={by === v}
+              onClick={() => setBy(v)}
+              className={cn(
+                'min-h-11 rounded-full border px-3 text-caption transition-colors md:min-h-7',
+                by === v
+                  ? 'border-gold/40 bg-gold/15 text-gold'
+                  : 'border-line bg-surface text-ink-mute hover:bg-hover',
+              )}
+            >
+              {v === 'docs' ? 'by documents' : 'recently active'}
+            </button>
+          ))}
+        </div>
+      </div>
       {top.isPending ? (
         <Skeleton className="h-48 w-full rounded-lg" />
       ) : top.isError ? (
@@ -237,8 +476,12 @@ function TopConnectorsCard() {
                     style={{ width: `${Math.max((c.doc_count / max) * 100, 1)}%` }}
                   />
                 </span>
-                <span className="text-right font-mono text-mono-sm text-ink-mute">
-                  {formatCount(c.doc_count)}
+                <span className="text-right font-mono text-mono-sm whitespace-nowrap text-ink-mute">
+                  {by === 'docs'
+                    ? formatCount(c.doc_count)
+                    : c.last_successful_index_time
+                      ? relative(c.last_successful_index_time)
+                      : 'never'}
                 </span>
               </Link>
             </li>
@@ -401,6 +644,12 @@ export function StatsView() {
               <Skeleton className="h-24 w-full rounded-lg" />
             )}
           </Card>
+
+          <CrawlCard crawl={o?.crawl} />
+          <CompositionCard />
+
+          <IndexInternalsCard o={o} />
+          <TopTagsCard />
 
           <TopConnectorsCard />
 

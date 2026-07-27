@@ -34,7 +34,7 @@ export function TopBar({ onOpenMobileSearch }: { onOpenMobileSearch: () => void 
 
   return (
     <header
-      className="glass-pill sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-x-0 border-t-0 px-3 md:px-4"
+      className="glass-pill sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-x-0 border-t-0 px-3 md:px-4 [view-transition-name:top-bar]"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       <div className="shrink-0">

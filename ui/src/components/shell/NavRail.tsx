@@ -17,8 +17,11 @@ export const NAV_ENTRIES = [
 ] as const;
 
 /**
- * Desktop-only (≥lg) icon rail, 64px collapsed, expanding to 256px on
- * hover or pinned (⌘.). Expansion overlays the content — no reflow.
+ * Desktop-only (≥lg) icon rail: 64px, expanding to 256px on hover (overlay)
+ * or pinned via ⌘. (in flow). One stable element tree — expansion is a width
+ * transition on a single panel, never a structural swap, so nothing remounts
+ * or flickers. The rail carries its own view-transition-name, so route
+ * changes never repaint it.
  */
 export function NavRail() {
   const [pinned, setPinned] = useState(() => {
@@ -60,15 +63,19 @@ export function NavRail() {
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       className={cn(
-        'relative z-20 hidden lg:flex h-full shrink-0 flex-col border-r border-line bg-surface/60 transition-[width] duration-200 ease-swift',
+        'relative z-20 hidden h-full shrink-0 lg:block [view-transition-name:nav-rail]',
+        'transition-[width] duration-200 ease-swift',
         pinned ? 'w-64' : 'w-16',
       )}
     >
       <div
         className={cn(
-          'flex h-full flex-col overflow-hidden py-3',
-          !pinned && expanded && 'absolute inset-y-0 left-0 w-64 border-r border-line-2 bg-surface shadow-2xl shadow-black/40',
-          !pinned && !expanded && 'w-16',
+          'absolute inset-y-0 left-0 flex flex-col overflow-hidden border-r py-3',
+          'transition-[width,background-color,border-color,box-shadow] duration-200 ease-swift',
+          expanded ? 'w-64' : 'w-16',
+          hovered && !pinned
+            ? 'border-line-2 bg-surface shadow-2xl shadow-black/40'
+            : 'border-line bg-surface/60 shadow-none',
         )}
       >
         <ul className="flex flex-col gap-1 px-2.5">
@@ -79,10 +86,8 @@ export function NavRail() {
                 <Link
                   to={to}
                   className={cn(
-                    'relative flex h-10 items-center gap-3 rounded-lg px-2.5 text-label transition-colors',
-                    active
-                      ? 'bg-active text-ink'
-                      : 'text-ink-mute hover:bg-hover hover:text-ink',
+                    'relative flex h-10 items-center rounded-lg text-label transition-colors duration-150',
+                    active ? 'bg-active text-ink' : 'text-ink-mute hover:bg-hover hover:text-ink',
                   )}
                 >
                   {active ? (
@@ -91,10 +96,13 @@ export function NavRail() {
                       className="absolute inset-y-2 left-0 w-0.5 rounded-full bg-gold"
                     />
                   ) : null}
-                  <Icon className="size-4.5 shrink-0" aria-hidden />
+                  {/* Fixed 44px icon column: icons never move as the width animates. */}
+                  <span className="flex w-11 shrink-0 items-center justify-center">
+                    <Icon className="size-4.5" aria-hidden />
+                  </span>
                   <span
                     className={cn(
-                      'truncate transition-opacity',
+                      'truncate whitespace-nowrap transition-opacity duration-150',
                       expanded ? 'opacity-100' : 'opacity-0',
                     )}
                   >
@@ -107,28 +115,35 @@ export function NavRail() {
         </ul>
 
         <div className="mt-auto flex flex-col gap-1 px-2.5">
-          {overview.data ? (
-            <div
-              className={cn(
-                'px-2.5 font-mono text-caption text-ink-faint transition-opacity',
-                expanded ? 'opacity-100' : 'opacity-0',
-              )}
-            >
-              {overview.data.documents_exact ? '' : '~'}
-              {compact(overview.data.documents)} documents
-            </div>
-          ) : null}
+          <div
+            className={cn(
+              'overflow-hidden px-3 font-mono text-caption whitespace-nowrap text-ink-faint transition-opacity duration-150',
+              expanded ? 'opacity-100' : 'opacity-0',
+            )}
+          >
+            {overview.data
+              ? `${overview.data.documents_exact ? '' : '~'}${compact(overview.data.documents)} documents`
+              : ' '}
+          </div>
           <button
             type="button"
             onClick={togglePin}
             aria-pressed={pinned}
+            title={pinned ? 'Unpin rail (⌘.)' : 'Pin rail (⌘.)'}
             className={cn(
-              'flex h-9 items-center gap-3 rounded-lg px-2.5 text-label transition-colors',
+              'flex h-9 items-center rounded-lg text-label transition-colors duration-150',
               pinned ? 'text-gold' : 'text-ink-faint hover:bg-hover hover:text-ink-mute',
             )}
           >
-            <Pin className="size-4 shrink-0" aria-hidden />
-            <span className={cn('truncate transition-opacity', expanded ? 'opacity-100' : 'opacity-0')}>
+            <span className="flex w-11 shrink-0 items-center justify-center">
+              <Pin className="size-4" aria-hidden />
+            </span>
+            <span
+              className={cn(
+                'truncate whitespace-nowrap transition-opacity duration-150',
+                expanded ? 'opacity-100' : 'opacity-0',
+              )}
+            >
               {pinned ? 'Unpin rail' : 'Pin rail'}
               <span className="ml-2 font-mono text-caption text-ink-faint">⌘.</span>
             </span>

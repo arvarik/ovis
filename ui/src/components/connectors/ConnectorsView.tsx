@@ -13,6 +13,7 @@ import { Checkbox } from '@/components/primitives/Checkbox';
 import { EmptyState, ErrorState } from '@/components/primitives/EmptyState';
 import { Input } from '@/components/primitives/Input';
 import { MenuRoot, MenuTrigger, MenuContent } from '@/components/primitives/Menu';
+import { Select } from '@/components/primitives/Select';
 import { Skeleton } from '@/components/primitives/Skeleton';
 import { useContainerWidth } from '@/hooks/useContainerWidth';
 import { connectorsRoute, type ConnectorsSearch, type ConnectorsSort } from '@/routes/connectors';
@@ -183,30 +184,28 @@ export function ConnectorsView() {
             aria-label="Filter connectors by name"
             className="max-w-56"
           />
-          <select
+          <Select
+            ariaLabel="Filter by source"
+            className="w-40"
             value={search.source ?? ''}
-            onChange={(e) => update({ source: e.target.value || undefined })}
-            aria-label="Filter by source"
-            className="min-h-11 rounded-lg border border-line bg-well px-3 text-base text-ink md:min-h-9 md:text-body focus:border-gold/60 focus:outline-none"
-          >
-            <option value="">All sources</option>
-            {sources.map((s) => (
-              <option key={s} value={s.toLowerCase()}>
-                {sourceLabel(s)}
-              </option>
-            ))}
-          </select>
-          <select
+            onValueChange={(v) => update({ source: v || undefined })}
+            options={[
+              { value: '', label: 'All sources' },
+              ...sources.map((s) => ({ value: s.toLowerCase(), label: sourceLabel(s) })),
+            ]}
+          />
+          <Select
+            ariaLabel="Sort connectors"
+            className="w-44"
             value={search.sort ?? 'docs'}
-            onChange={(e) => update({ sort: e.target.value === 'docs' ? undefined : (e.target.value as ConnectorsSort) })}
-            aria-label="Sort connectors"
-            className="min-h-11 rounded-lg border border-line bg-well px-3 text-base text-ink md:min-h-9 md:text-body focus:border-gold/60 focus:outline-none"
-          >
-            <option value="docs">Most documents</option>
-            <option value="recent">Recent activity</option>
-            <option value="errors">Errors first</option>
-            <option value="name">Name</option>
-          </select>
+            onValueChange={(v) => update({ sort: v === 'docs' ? undefined : (v as ConnectorsSort) })}
+            options={[
+              { value: 'docs', label: 'Most documents' },
+              { value: 'recent', label: 'Recent activity' },
+              { value: 'errors', label: 'Errors first' },
+              { value: 'name', label: 'Name' },
+            ]}
+          />
           <span aria-live="polite" className="ml-auto font-mono text-caption text-ink-faint">
             {connectors.isPending ? 'loading…' : `${rows.length} of ${all.length}`}
           </span>

@@ -36,8 +36,10 @@ function DepRow({ name, dep }: { name: string; dep: DependencyHealth }) {
 }
 
 /**
- * The always-visible system status (D7 fix: health finally rendered).
- * Tap → dependency latencies, index name, versions — live data only.
+ * The system status indicator. Silence is the healthy state: nothing renders
+ * while everything is ok, and the dot (gold degraded / rose unreachable)
+ * appears only when there is something to say. Tap → dependency latencies,
+ * index name, versions — live data only.
  */
 export function HealthDot() {
   const health = useQuery(healthQuery);
@@ -51,8 +53,9 @@ export function HealthDot() {
         : 'degraded'
       : 'ok';
 
-  const label =
-    lv === 'ok' ? 'All systems healthy' : lv === 'degraded' ? 'Degraded' : 'Backend unreachable';
+  if (lv === 'ok') return null;
+
+  const label = lv === 'degraded' ? 'Degraded' : 'Backend unreachable';
 
   return (
     <Popover.Root>
@@ -73,7 +76,7 @@ export function HealthDot() {
             <span
               className={cn(
                 'text-caption font-medium',
-                lv === 'ok' ? 'text-mint' : lv === 'degraded' ? 'text-gold' : 'text-rose',
+                lv === 'degraded' ? 'text-gold' : 'text-rose',
               )}
             >
               {label}

@@ -34,7 +34,7 @@ export function BottomTabs({ onOpenSearch }: { onOpenSearch: () => void }) {
   return (
     <nav
       aria-label="Primary"
-      className="glass-pill z-30 flex shrink-0 items-stretch gap-1 border-x-0 border-b-0 px-2 pt-1.5 lg:hidden"
+      className="glass-pill z-30 flex shrink-0 items-stretch gap-1 border-x-0 border-b-0 px-2 pt-1.5 lg:hidden [view-transition-name:bottom-tabs]"
       style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.375rem)' }}
     >
       {left.map(renderTab)}

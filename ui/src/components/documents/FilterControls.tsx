@@ -1,4 +1,4 @@
-import { useState, type ReactNode, type SelectHTMLAttributes } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate, useSearch } from '@tanstack/react-router';
 import { Popover } from 'radix-ui';
 import { SlidersHorizontal, X } from 'lucide-react';
@@ -8,6 +8,7 @@ import { cn } from '@/lib/cn';
 import { compact, sourceLabel } from '@/lib/format';
 import { Button } from '@/components/primitives/Button';
 import { Input } from '@/components/primitives/Input';
+import { Select } from '@/components/primitives/Select';
 import { Sheet } from '@/components/primitives/Sheet';
 import { useIsDesktop } from '@/hooks/useMediaQuery';
 import { PAGE_SORTS, type PagesSearch, type PagesSort } from '@/routes/pages';
@@ -42,19 +43,6 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
   );
 }
 
-function Select({ className, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select
-      className={cn(
-        'min-h-11 w-full rounded-lg border border-line bg-well px-3 text-base text-ink md:min-h-9 md:text-body',
-        'focus:border-gold/60 focus:ring-2 focus:ring-gold/20 focus:outline-none',
-        className,
-      )}
-      {...props}
-    />
-  );
-}
-
 /** How many filters are active (shown on the filter button badge). */
 export function activeFilterCount(search: PagesSearch): number {
   let n = 0;
@@ -83,45 +71,42 @@ export function FilterControls() {
     <div className="flex flex-col gap-4">
       <Field label="Connector">
         <Select
-          value={search.connector ?? ''}
-          onChange={(e) =>
-            update({ connector: e.target.value === '' ? undefined : Number(e.target.value) })
-          }
-        >
-          <option value="">Any connector</option>
-          {sorted.map((c) => (
-            <option key={c.cc_pair_id} value={c.connector_id}>
-              {c.name} ({compact(c.doc_count)})
-            </option>
-          ))}
-        </Select>
+          ariaLabel="Connector"
+          value={search.connector === undefined ? '' : String(search.connector)}
+          onValueChange={(v) => update({ connector: v === '' ? undefined : Number(v) })}
+          options={[
+            { value: '', label: 'Any connector' },
+            ...sorted.map((c) => ({
+              value: String(c.connector_id),
+              label: `${c.name} (${compact(c.doc_count)})`,
+            })),
+          ]}
+        />
       </Field>
 
       <Field label="Source">
         <Select
+          ariaLabel="Source"
           value={search.source ?? ''}
-          onChange={(e) => update({ source: e.target.value === '' ? undefined : e.target.value })}
-        >
-          <option value="">Any source</option>
-          {sources.map((s) => (
-            <option key={s} value={s.toLowerCase()}>
-              {sourceLabel(s)}
-            </option>
-          ))}
-        </Select>
+          onValueChange={(v) => update({ source: v === '' ? undefined : v })}
+          options={[
+            { value: '', label: 'Any source' },
+            ...sources.map((s) => ({ value: s.toLowerCase(), label: sourceLabel(s) })),
+          ]}
+        />
       </Field>
 
       <Field label="Visibility">
         <Select
+          ariaLabel="Visibility"
           value={search.hidden === undefined ? '' : String(search.hidden)}
-          onChange={(e) =>
-            update({ hidden: e.target.value === '' ? undefined : e.target.value === 'true' })
-          }
-        >
-          <option value="">All pages</option>
-          <option value="false">Visible only</option>
-          <option value="true">Hidden only</option>
-        </Select>
+          onValueChange={(v) => update({ hidden: v === '' ? undefined : v === 'true' })}
+          options={[
+            { value: '', label: 'All pages' },
+            { value: 'false', label: 'Visible only' },
+            { value: 'true', label: 'Hidden only' },
+          ]}
+        />
       </Field>
 
       <div className="grid grid-cols-2 gap-3">
@@ -155,18 +140,13 @@ export function FilterControls() {
 
       <Field label="Sort">
         <Select
+          ariaLabel="Sort"
           value={search.sort ?? 'updated_desc'}
-          onChange={(e) => {
-            const v = e.target.value as PagesSort;
-            update({ sort: v === 'updated_desc' ? undefined : v });
-          }}
-        >
-          {PAGE_SORTS.map((s) => (
-            <option key={s} value={s}>
-              {SORT_LABELS[s]}
-            </option>
-          ))}
-        </Select>
+          onValueChange={(v) =>
+            update({ sort: v === 'updated_desc' ? undefined : (v as PagesSort) })
+          }
+          options={PAGE_SORTS.map((s) => ({ value: s, label: SORT_LABELS[s] }))}
+        />
       </Field>
 
       {activeFilterCount(search) > 0 ? (

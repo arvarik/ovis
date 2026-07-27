@@ -19,6 +19,7 @@ import type {
   SearchResponse,
   SourceStat,
   StatsOverview,
+  TagFacet,
   TimelineResponse,
   TopConnector,
 } from './types';
@@ -64,11 +65,20 @@ export const sourcesQuery = queryOptions({
   staleTime: 60_000,
 });
 
-export function topConnectorsQuery(limit = 10) {
+export function topConnectorsQuery(by: 'docs' | 'recent' = 'docs', limit = 10) {
   return queryOptions({
-    queryKey: ['stats', 'top-connectors', limit],
+    queryKey: ['stats', 'top-connectors', by, limit],
     queryFn: ({ signal }) =>
-      api.get<TopConnector[]>('/stats/connectors/top', { by: 'docs', limit }, signal),
+      api.get<TopConnector[]>('/stats/connectors/top', { by, limit }, signal),
+    staleTime: 60_000,
+  });
+}
+
+/** Tag facet counts (server-cached 60 s). */
+export function tagsQuery(limit = 10) {
+  return queryOptions({
+    queryKey: ['tags', limit],
+    queryFn: ({ signal }) => api.get<TagFacet[]>('/tags', { limit }, signal),
     staleTime: 60_000,
   });
 }
