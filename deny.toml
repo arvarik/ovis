@@ -1,0 +1,68 @@
+# cargo-deny configuration.
+#
+#     cargo install cargo-deny --locked
+#     cargo deny check
+#
+# Three questions: are we shipping a known vulnerability, are we shipping a
+# licence we should not, and are we carrying the same crate at three versions.
+
+[graph]
+# Only what actually builds for the deployment targets. This is also why the
+# `rsa` advisory below is a non-issue: it arrives through an optional sqlx
+# feature that is never enabled.
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "aarch64-unknown-linux-gnu",
+    "aarch64-apple-darwin",
+]
+all-features = false
+
+[advisories]
+yanked = "deny"
+ignore = [
+    # See .cargo/audit.toml for the full reasoning: `rsa` reaches the lockfile
+    # only through `sqlx-mysql`, an optional sqlx feature OVIS does not enable, so
+    # it is never compiled or linked.
+    { id = "RUSTSEC-2023-0071", reason = "sqlx-mysql is optional and not enabled; rsa is never built" },
+    # Both from ratatui 0.26 in ovis-cli, neither reachable from the backend, both
+    # resolved by the CLI redesign's ratatui upgrade.
+    { id = "RUSTSEC-2024-0436", reason = "paste is unmaintained; transitively via ratatui 0.26 (CLI only)" },
+    { id = "RUSTSEC-2026-0002", reason = "lru IterMut unsoundness; via ratatui 0.26 (CLI only), never called" },
+]
+
+[licences]
+# Permissive licences only. OVIS is deployed as a single binary that embeds
+# everything, so a copyleft dependency would be a real obligation rather than a
+# formality.
+version = 2
+allow = [
+    "MIT",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "Unicode-DFS-2016",
+    "Zlib",
+    "MPL-2.0",
+    "CDLA-Permissive-2.0",
+    "OpenSSL",
+]
+confidence-threshold = 0.9
+
+[[licences.clarify]]
+crate = "ring"
+expression = "MIT AND ISC AND OpenSSL"
+license-files = [{ path = "LICENSE", hash = 0xbd0eed23 }]
+
+[bans]
+# Duplicate versions are noise in a workspace this size, not a defect: they come
+# from transitive dependencies converging at different speeds.
+multiple-versions = "warn"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,95 @@
+# ---------------------------------------------------------------------------
+# Secrets
+#
+# Nothing in this repository should ever contain a credential. `.env.example` is
+# the committed template; every real value lives in an untracked `.env` or in the
+# process environment. The deny-then-allow shape below means a new secret-ish
+# filename is ignored by default rather than having to be remembered.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+!example.env
+
+ovis.toml
+*.local.toml
+
+# Keys, certificates, tokens
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+*.token
+*_token
+.netrc
+.pgpass
+secrets/
+.secrets/
+credentials.json
+gcp-credentials.json
+service-account*.json
+
+# Cookie jars, if anyone runs the manual Onyx login flow by hand
+*.cookies
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+/target
+**/target
+*.rs.bk
+*.pdb
+
+ui/node_modules
+# The built UI is embedded by rust-embed at compile time, so it is a build
+# artifact and not tracked — but the directory and a placeholder index.html are,
+# so a fresh clone compiles before anyone has run `npm run build`.
+ui/dist/*
+!ui/dist/.gitkeep
+!ui/dist/index.html
+ui/.vite
+ui/coverage
+
+# ---------------------------------------------------------------------------
+# Agent and tooling scratch
+#
+# `.agents/` held prior multi-agent session transcripts. They quoted the
+# production database password in 29 files — exactly what must never reach a
+# commit.
+# ---------------------------------------------------------------------------
+.agents/
+.claude/
+*.log
+!ops/*.log
+
+# ---------------------------------------------------------------------------
+# Editors and operating systems
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+desktop.ini
+
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+
+# ---------------------------------------------------------------------------
+# Python leftovers from the deleted simulator suite
+# ---------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+venv/

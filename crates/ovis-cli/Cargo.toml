@@ -1,0 +1,28 @@
+[package]
+name = "ovis-cli"
+version = "0.2.0"
+edition = "2021"
+description = "Clap CLI and Ratatui TUI for OVIS"
+
+[[bin]]
+name = "ovis"
+path = "src/main.rs"
+
+[dependencies]
+ovis-core = { path = "../ovis-core" }
+ovis-backend = { path = "../ovis-backend" }
+ovis-prune = { path = "../ovis-prune" }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+axum = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+comfy-table = "7.1"
+ratatui = "0.26"
+crossterm = "0.27"
+anyhow = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true }
+dirs = "5.0"

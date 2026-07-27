@@ -1,0 +1,22 @@
+[package]
+name = "ovis-prune"
+version = "0.2.0"
+edition = "2021"
+description = "Deduplication and pruning engine for OVIS"
+
+[dependencies]
+ovis-core = { path = "../ovis-core" }
+tokio = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+regex = "1.10"
+chrono = { workspace = true }
+tracing = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true, optional = true }
+
+[features]
+default = []
+cli = ["dep:clap"]

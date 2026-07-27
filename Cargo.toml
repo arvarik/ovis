@@ -1,0 +1,68 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/ovis-core",
+    "crates/ovis-backend",
+    "crates/ovis-bench",
+    "crates/ovis-cli",
+    "crates/ovis-prune",
+]
+
+[workspace.dependencies]
+# --- runtime / async ---
+tokio = { version = "1.47", features = ["full"] }
+tokio-stream = "0.1"
+
+# --- data access ---
+sqlx = { version = "0.8", features = [
+    "runtime-tokio",
+    "tls-native-tls",
+    "postgres",
+    "chrono",
+    "json",
+] }
+reqwest = { version = "0.12", features = ["json", "gzip"] }
+
+# --- serialization ---
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+chrono = { version = "0.4", features = ["serde"] }
+base64 = "0.22"
+
+# --- errors ---
+thiserror = "2.0"
+anyhow = "1.0"
+
+# --- observability ---
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+metrics = "0.24"
+metrics-exporter-prometheus = { version = "0.17", default-features = false }
+
+# --- http server ---
+axum = { version = "0.8", features = ["macros"] }
+tower = { version = "0.5", features = ["util", "timeout"] }
+tower-http = { version = "0.6", features = [
+    "cors",
+    "trace",
+    "timeout",
+    "limit",
+    "request-id",
+    "set-header",
+    "compression-gzip",
+    "compression-br",
+] }
+http = "1.1"
+
+# --- caching / config / misc ---
+moka = { version = "0.12", features = ["future"] }
+arc-swap = "1.7"
+figment = { version = "0.10", features = ["toml", "env"] }
+percent-encoding = "2.3"
+
+# --- ui embedding ---
+rust-embed = "8.5"
+mime_guess = "2.0"
+
+# --- cli ---
+clap = { version = "4.5", features = ["derive", "env"] }

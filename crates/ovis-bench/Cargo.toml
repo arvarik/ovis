@@ -1,0 +1,16 @@
+[package]
+name = "ovis-bench"
+version = "0.2.0"
+edition = "2021"
+description = "Performance acceptance-gate harness for the OVIS backend"
+
+[[bin]]
+name = "ovis-bench"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+clap = { workspace = true }

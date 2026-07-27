@@ -1,0 +1,23 @@
+[package]
+name = "ovis-core"
+version = "0.2.0"
+edition = "2021"
+description = "OVIS data plane: Onyx Postgres queries, OpenSearch client, Onyx API client, shared wire types"
+
+[dependencies]
+tokio = { workspace = true }
+tokio-stream = { workspace = true }
+sqlx = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+chrono = { workspace = true }
+reqwest = { workspace = true, features = ["cookies"] }
+base64 = { workspace = true }
+percent-encoding = { workspace = true }
+metrics = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"

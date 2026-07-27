@@ -1,0 +1,61 @@
+# OVIS against an existing Onyx deployment.
+#
+# OVIS brings no database of its own: Postgres and OpenSearch belong to Onyx, and
+# OVIS reads them. The previous version of this file started its *own* empty
+# Postgres and OpenSearch, which meant a `docker compose up` produced a server
+# that connected successfully to nothing at all.
+#
+# Copy `.env.example` to `.env` and fill it in, then:
+#
+#     docker compose up -d --build
+#
+# Recommended placement is on the Onyx host itself (gamma), where the Postgres and
+# OpenSearch round-trips are sub-millisecond.
+
+services:
+  ovis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        # Stamped into GET /api/v1/system/version.
+        OVIS_GIT_SHA: ${OVIS_GIT_SHA:-unknown}
+    image: ovis:latest
+    container_name: ovis
+    ports:
+      - "${OVIS_BIND:-127.0.0.1}:8080:8080"
+    environment:
+      # --- required ---
+      # Postgres *direct*, not pgbouncer: SQLx uses prepared statements and
+      # pgbouncer's transaction pooling breaks them. On the homelab deployment
+      # that means port 5433, not 5432.
+      DATABASE_URL: ${DATABASE_URL:?set DATABASE_URL in .env}
+      OPENSEARCH_URL: ${OPENSEARCH_URL:?set OPENSEARCH_URL in .env}
+
+      # --- optional: connector actions ---
+      # Without both of these, pause/resume/run-once/prune answer
+      # 503 ONYX_UNCONFIGURED. See README "Onyx API token".
+      ONYX_API_URL: ${ONYX_API_URL:-}
+      ONYX_API_KEY: ${ONYX_API_KEY:-}
+
+      # --- optional: semantic and hybrid search ---
+      # Unset means mode=semantic|hybrid degrade to keyword search and say so.
+      EMBED_API_URL: ${EMBED_API_URL:-}
+      EMBED_MODEL: ${EMBED_MODEL:-snowflake-arctic-embed:m}
+
+      # --- optional: access control ---
+      # Set both as soon as this is reachable beyond localhost.
+      OVIS_API_TOKEN: ${OVIS_API_TOKEN:-}
+      OVIS_CORS_ORIGINS: ${OVIS_CORS_ORIGINS:-*}
+
+      OVIS_LOG_FORMAT: ${OVIS_LOG_FORMAT:-text}
+      RUST_LOG: ${RUST_LOG:-ovis_backend=info,ovis_core=info,tower_http=warn,sqlx=warn}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/api/v1/system/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # Long enough for the in-flight drain (default 10 s) plus a margin.
+    stop_grace_period: 20s
+    restart: unless-stopped
