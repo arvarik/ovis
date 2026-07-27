@@ -11,7 +11,7 @@
 #
 # Environment:
 #     ONYX_API_URL     default http://192.168.4.113:8080
-#     ONYX_ADMIN_EMAIL default admin@example.com
+#     ONYX_ADMIN_EMAIL (required)
 #     ONYX_ADMIN_PASSWORD  read interactively if unset (never echoed, never
 #                          stored, never passed on a command line where `ps`
 #                          could see it)
@@ -28,7 +28,7 @@ set -euo pipefail
 
 ONYX="${ONYX_API_URL:-http://192.168.4.113:8080}"
 ONYX="${ONYX%/}"
-EMAIL="${ONYX_ADMIN_EMAIL:-admin@example.com}"
+EMAIL="${ONYX_ADMIN_EMAIL:?set ONYX_ADMIN_EMAIL to your Onyx admin login}"
 TOKEN_NAME="${ONYX_TOKEN_NAME:-ovis}"
 ACTION="${1:-create}"
 
