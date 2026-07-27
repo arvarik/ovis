@@ -3,6 +3,7 @@ name = "ovis-backend"
 version = "0.2.0"
 edition = "2021"
 description = "Axum REST & SSE API server for OVIS"
+publish = false
 
 [dependencies]
 ovis-core = { path = "../ovis-core" }

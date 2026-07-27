@@ -3,6 +3,7 @@ name = "ovis-bench"
 version = "0.2.0"
 edition = "2021"
 description = "Performance acceptance-gate harness for the OVIS backend"
+publish = false
 
 [[bin]]
 name = "ovis-bench"
