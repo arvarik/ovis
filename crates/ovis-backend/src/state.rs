@@ -224,6 +224,13 @@ pub struct PruneHandle {
     /// `false` when the database user could not create the tables; every
     /// `/prune/*` endpoint reports the feature unavailable.
     pub enabled: bool,
+    /// `false` when `ovis.trash_document` could not be created.
+    ///
+    /// The reaper refuses to delete anything while this is false. Deleting
+    /// without a place to put the snapshot would be the pre-v2 behaviour —
+    /// irreversible — and silently falling back to it is precisely the
+    /// failure the trash exists to rule out.
+    pub trash_enabled: bool,
     pub reaper: Arc<std::sync::RwLock<PruneReaperState>>,
     /// Notified when a scan is queued, so the runner picks it up immediately
     /// rather than at its next poll tick.
@@ -231,9 +238,10 @@ pub struct PruneHandle {
 }
 
 impl PruneHandle {
-    pub fn new(enabled: bool) -> Self {
+    pub fn new(enabled: bool, trash_enabled: bool) -> Self {
         Self {
             enabled,
+            trash_enabled,
             reaper: Arc::new(std::sync::RwLock::new(PruneReaperState::default())),
             scan_wake: Arc::new(tokio::sync::Notify::new()),
         }

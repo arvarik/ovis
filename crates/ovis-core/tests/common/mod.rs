@@ -16,7 +16,7 @@
 
 #![allow(dead_code)]
 
-use sqlx::PgPool;
+use sqlx::{Connection, PgConnection, PgPool};
 use tokio::sync::{Mutex, MutexGuard};
 
 /// Serialises the tests.
@@ -27,10 +27,50 @@ use tokio::sync::{Mutex, MutexGuard};
 /// transaction, so there would be nothing to roll back around it.
 static EXCLUSIVE: Mutex<()> = Mutex::const_new(());
 
+/// The advisory-lock key every database-backed suite in this workspace takes
+/// before reseeding.
+///
+/// The in-process mutex above only serialises tests *within one test binary*,
+/// and `cargo test` runs binaries in parallel. Without a lock the database
+/// itself arbitrates, so a suite that deletes documents (the trash round trip)
+/// runs concurrently with one that counts them (the prune scans) and the
+/// counts come out short. Keep this value identical in every harness.
+pub const DB_LOCK_KEY: i64 = 0x0715_0000_0000_0001;
+
 /// A seeded database, held exclusively for the life of the returned value.
 pub struct TestDb {
     pub pool: PgPool,
+    _lock: DbLock,
     _guard: MutexGuard<'static, ()>,
+}
+
+/// Holds a session-level advisory lock for as long as it is alive.
+///
+/// The lock lives on its own connection rather than one from the pool: a
+/// pooled connection goes back to the pool still holding the lock, whereas
+/// dropping a dedicated connection ends its session and releases it.
+pub struct DbLock(Option<PgConnection>);
+
+impl DbLock {
+    pub async fn acquire(dsn: &str) -> Self {
+        match PgConnection::connect(dsn).await {
+            Ok(mut conn) => {
+                let locked = sqlx::query("SELECT pg_advisory_lock($1)")
+                    .bind(DB_LOCK_KEY)
+                    .execute(&mut conn)
+                    .await;
+                if let Err(err) = locked {
+                    eprintln!("could not take the shared test-database lock: {err}");
+                    return Self(None);
+                }
+                Self(Some(conn))
+            }
+            Err(err) => {
+                eprintln!("could not open a lock connection: {err}");
+                Self(None)
+            }
+        }
+    }
 }
 
 impl std::ops::Deref for TestDb {
@@ -63,10 +103,18 @@ pub async fn pool() -> Option<PgPool> {
 /// value is dropped.
 pub async fn seeded() -> Option<TestDb> {
     let guard = EXCLUSIVE.lock().await;
+    let dsn = std::env::var("OVIS_TEST_DATABASE_URL").ok()?;
+    if dsn.trim().is_empty() {
+        return None;
+    }
+    // Take the cross-process lock *before* reseeding: another binary's suite
+    // may be mid-scan against the rows we are about to delete.
+    let lock = DbLock::acquire(&dsn).await;
     let pool = pool().await?;
     reseed(&pool).await;
     Some(TestDb {
         pool,
+        _lock: lock,
         _guard: guard,
     })
 }
@@ -95,6 +143,21 @@ const SEEDED_TABLES: [&str; 13] = [
     "search_settings",
 ];
 
+/// OVIS-owned tables that survive a `public` reseed and would otherwise carry
+/// state between tests. The trash in particular is keyed by document id, so a
+/// leftover snapshot makes the next test's counts wrong in a way that looks
+/// like a product bug.
+const OVIS_TABLES: [&str; 8] = [
+    "trash_document",
+    "pending_index_restores",
+    "pending_index_deletes",
+    "doc_profile",
+    "dup_pair",
+    "prune_candidate",
+    "prune_audit",
+    "prune_exclusions",
+];
+
 /// Restore the seed state.
 ///
 /// Not a transaction-per-test: the delete path under test commits its own
@@ -105,6 +168,13 @@ pub async fn reseed(pool: &PgPool) {
             .execute(pool)
             .await
             .unwrap_or_else(|e| panic!("clearing {table}: {e}"));
+    }
+    // Best-effort: these tables only exist once the relevant `ensure_tables`
+    // has run, and a fresh database legitimately has none of them.
+    for table in OVIS_TABLES {
+        let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))
+            .execute(pool)
+            .await;
     }
     sqlx::raw_sql(include_str!("../../../../tests/fixtures/seed.sql"))
         .execute(pool)

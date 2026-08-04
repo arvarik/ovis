@@ -63,8 +63,45 @@ struct Harness {
     app: axum::Router,
     state: AppState,
     _os: MockServer,
+    _lock: DbLock,
     _guard: tokio::sync::MutexGuard<'static, ()>,
 }
+
+/// The shared advisory-lock key, kept identical across every database-backed
+/// suite in this workspace (see `ovis-core/tests/common/mod.rs`).
+///
+/// `cargo test` runs test binaries in parallel and they all point at one
+/// database, so the in-process mutex above is not enough: another binary's
+/// suite can be deleting the very documents this one is counting. The lock
+/// lives on its own connection because a pooled connection would return to the
+/// pool still holding it.
+const DB_LOCK_KEY: i64 = 0x0715_0000_0000_0001;
+
+struct DbLock(#[allow(dead_code)] Option<sqlx::PgConnection>);
+
+impl DbLock {
+    async fn acquire(dsn: &str) -> Self {
+        use sqlx::Connection;
+        match sqlx::PgConnection::connect(dsn).await {
+            Ok(mut conn) => {
+                if let Err(err) = sqlx::query("SELECT pg_advisory_lock($1)")
+                    .bind(DB_LOCK_KEY)
+                    .execute(&mut conn)
+                    .await
+                {
+                    eprintln!("could not take the shared test-database lock: {err}");
+                    return Self(None);
+                }
+                Self(Some(conn))
+            }
+            Err(err) => {
+                eprintln!("could not open a lock connection: {err}");
+                Self(None)
+            }
+        }
+    }
+}
+
 
 /// OpenSearch stand-in. `read_only` controls what `{index}/_settings` reports,
 /// which is what halts the reaper.
@@ -163,6 +200,10 @@ async fn harness_with(
         return None;
     }
 
+    // Cross-process lock before reseeding: another binary may be mid-test
+    // against the rows about to be deleted.
+    let lock = DbLock::acquire(&dsn).await;
+
     let os_server = mock_opensearch(read_only).await;
 
     let mut cfg = ServerConfig {
@@ -179,6 +220,10 @@ async fn harness_with(
     reseed(&db).await;
     let prune_enabled = ovis_core::db::prune::ensure_tables(&db).await;
     assert!(prune_enabled, "the test database must accept ovis DDL");
+    assert!(
+        ovis_core::db::trash::ensure_tables(&db).await,
+        "the trash table must be creatable; the reaper refuses to delete without it"
+    );
     assert!(
         ovis_core::db::pending_deletes::ensure_table(&db).await,
         "the retry queue table must be creatable"
@@ -209,7 +254,7 @@ async fn harness_with(
         cfg,
         build: BuildInfo::current(),
         pending_deletes_enabled: true,
-        prune: PruneHandle::new(true),
+        prune: PruneHandle::new(true, true),
         metrics: None,
     };
 
@@ -217,6 +262,7 @@ async fn harness_with(
         app: ovis_backend::app(state.clone()),
         state,
         _os: os_server,
+        _lock: lock,
         _guard: guard,
     })
 }

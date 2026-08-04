@@ -70,6 +70,7 @@ ui/scripts/shots/
 # (Both were also purged from git history before the remote existed.)
 implementation/
 redesign/
+docs/pruning-v2-design.md
 
 # ---------------------------------------------------------------------------
 # Editors and operating systems

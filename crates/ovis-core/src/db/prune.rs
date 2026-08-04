@@ -124,6 +124,95 @@ const DDL: &[&str] = &[
     )",
     "CREATE INDEX IF NOT EXISTS ix_ovis_prune_minhash_band_bucket \
         ON ovis.prune_minhash_band (band, hash)",
+    // -----------------------------------------------------------------
+    // v2: measurements, not verdicts.
+    //
+    // A scan writes what it *measured* about a document here; policy turns
+    // measurements into candidates at read time. That split is what lets the
+    // review UI answer "what would a stricter setting flag?" without a
+    // re-scan, and what makes a threshold change re-band instantly instead of
+    // invalidating hours of work.
+    // -----------------------------------------------------------------
+    "CREATE TABLE IF NOT EXISTS ovis.doc_profile ( \
+        document_id        text PRIMARY KEY, \
+        computed_at        timestamptz NOT NULL DEFAULT now(), \
+        config_hash        text, \
+        fingerprint        text, \
+        connector_id       int, \
+        word_count         int, \
+        chunk_count        int, \
+        quality_metrics    jsonb, \
+        quality_gates      text[], \
+        quality_fail_count smallint NOT NULL DEFAULT 0, \
+        quality_families   smallint NOT NULL DEFAULT 0, \
+        canonical_url      text, \
+        url_class          text, \
+        path_depth         smallint, \
+        has_query          boolean, \
+        archive_of         text, \
+        lang               text, \
+        lang_confidence    real, \
+        content_hash       text, \
+        dup_group          text, \
+        dup_group_size     int, \
+        max_jaccard        real, \
+        max_jaccard_doc    text, \
+        max_cosine         real, \
+        max_cosine_doc     text, \
+        centroid_sim       real, \
+        centroid_pct       real, \
+        cluster_id         int, \
+        judge_score        real, \
+        distilled_score    real, \
+        retrieval_count    int \
+    )",
+    // Every column policy can threshold on gets an index: `/prune/simulate`
+    // is a full-corpus aggregate and runs on every drag of the UI slider.
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_quality \
+        ON ovis.doc_profile (quality_fail_count DESC, quality_families DESC)",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_words \
+        ON ovis.doc_profile (word_count)",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_connector \
+        ON ovis.doc_profile (connector_id)",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_canonical \
+        ON ovis.doc_profile (canonical_url) WHERE canonical_url IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_url_class \
+        ON ovis.doc_profile (url_class)",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_jaccard \
+        ON ovis.doc_profile (max_jaccard DESC) WHERE max_jaccard IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_cosine \
+        ON ovis.doc_profile (max_cosine DESC) WHERE max_cosine IS NOT NULL",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_dup_group \
+        ON ovis.doc_profile (dup_group) WHERE dup_group IS NOT NULL",
+    // Verified pair similarities. Stored rather than thresholded away so the
+    // acting threshold can move without recomputing anything (the SemHash
+    // operational pattern).
+    "CREATE TABLE IF NOT EXISTS ovis.dup_pair ( \
+        a           text NOT NULL, \
+        b           text NOT NULL, \
+        method      text NOT NULL, \
+        estimated   real, \
+        verified    real, \
+        cosine      real, \
+        same_connector boolean, \
+        verified_at timestamptz NOT NULL DEFAULT now(), \
+        PRIMARY KEY (a, b, method) \
+    )",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_dup_pair_b ON ovis.dup_pair (b)",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_dup_pair_score \
+        ON ovis.dup_pair (method, COALESCE(verified, estimated) DESC)",
+    // Named threshold sets. A policy is applied, not baked in: committing one
+    // creates candidates, and re-committing a changed one re-bands them.
+    "CREATE TABLE IF NOT EXISTS ovis.prune_policy ( \
+        id          bigserial PRIMARY KEY, \
+        name        text UNIQUE NOT NULL, \
+        tier        text NOT NULL, \
+        body        jsonb NOT NULL, \
+        config_hash text NOT NULL, \
+        active      boolean NOT NULL DEFAULT false, \
+        created_at  timestamptz NOT NULL DEFAULT now(), \
+        updated_at  timestamptz NOT NULL DEFAULT now() \
+    )",
 ];
 
 /// The starter URL rules from the detection strategy. Shipped **disabled** —

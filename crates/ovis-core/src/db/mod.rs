@@ -19,8 +19,10 @@ pub mod indexing;
 pub mod pending_deletes;
 pub mod pool;
 pub mod probe;
+pub mod profile;
 pub mod prune;
 pub mod stats;
 pub mod tags;
+pub mod trash;
 
 pub use pool::create_pg_pool;

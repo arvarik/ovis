@@ -16,8 +16,8 @@ use std::collections::HashSet;
 
 use chrono::{Duration as ChronoDuration, Utc};
 use ovis_core::api_types::{PruneCandidateItem, PruneReason};
-use ovis_core::db::documents;
 use ovis_core::db::prune as db;
+use ovis_core::db::trash;
 use serde_json::json;
 
 use crate::error::AppError;
@@ -95,6 +95,11 @@ pub async fn run_cycle(state: &AppState) -> Result<CycleReport, AppError> {
 
     reap_due(state, &mut report).await?;
     restage_recrawled(state, &mut report).await?;
+    if let Err(err) = purge_expired_trash(state, &mut report).await {
+        // A purge failure must never abort the cycle: everything above it has
+        // already committed, and retained-too-long is the safe direction.
+        tracing::warn!(error = %err.log_detail(), "trash purge failed; will retry next cycle");
+    }
 
     let deferred_reason = if report.deferred_indexing > 0 {
         Some("indexing_in_progress".to_string())
@@ -134,11 +139,19 @@ pub struct CycleReport {
     pub deferred_rate: i64,
     pub restaged: i64,
     pub recovered: i64,
+    pub purged: i64,
     pub halted: bool,
 }
 
 /// `Some(reason)` when deletion must not run.
 async fn check_read_only(state: &AppState) -> Option<String> {
+    // No trash, no deletion. This is checked before the index because it is
+    // the more fundamental refusal: a read-only index is a temporary condition
+    // that resolves itself, whereas deleting with nowhere to put the snapshot
+    // is unrecoverable by construction.
+    if !state.prune.trash_enabled {
+        return Some("trash_unavailable".into());
+    }
     let index = state.index_name();
     match state.os.index_read_only(&index).await {
         Ok(false) => None,
@@ -367,18 +380,26 @@ async fn reap_due(state: &AppState, report: &mut CycleReport) -> Result<(), AppE
 }
 
 /// Cascade one claimed document and record the honest outcome.
+///
+/// Every deletion is preceded by a trash snapshot, and the snapshot shares the
+/// deletion's transaction (see [`ovis_core::db::trash::trash_and_delete`]). A
+/// document that cannot be snapshotted is **not** deleted: the whole point of
+/// the trash is that the last step of pruning stopped being irreversible, and
+/// a silent fallback to unrecoverable deletion would give that back.
 async fn delete_one(
     state: &AppState,
     index: &str,
     row: &PruneCandidateItem,
 ) -> Result<(), &'static str> {
-    match documents::delete_document_cascading(&state.db, &state.os, index, &row.document_id).await
-    {
+    match trash_delete(state, index, row).await {
         Ok(outcome) => {
             let outcome_json = json!({
                 "chunks_deleted": outcome.chunks_deleted,
                 "index_cleanup_pending": outcome.index_cleanup_pending,
                 "recrawl_risk": outcome.recrawl_risk,
+                "trashed": true,
+                "snapshot_bytes": outcome.snapshot_bytes,
+                "restorable_until": outcome.restorable_until,
             });
             let _ = db::mark_deleted(&state.db, row.id, outcome_json.clone()).await;
             if row.remember {
@@ -444,6 +465,113 @@ async fn delete_one(
             Err("DELETE_FAILED")
         }
     }
+}
+
+/// What one trashed deletion produced.
+struct TrashedOutcome {
+    chunks_deleted: u64,
+    index_cleanup_pending: bool,
+    recrawl_risk: bool,
+    snapshot_bytes: i64,
+    restorable_until: chrono::DateTime<Utc>,
+}
+
+/// Snapshot, then delete, then clear the index.
+///
+/// Ordering is the safety property: the OpenSearch read happens *before* the
+/// transaction (so a failure aborts with the document intact), the snapshot
+/// and the Postgres cascade commit together, and the index delete happens
+/// last — where a failure is ordinary cleanup debt rather than lost content,
+/// because the chunk bodies are inside the snapshot.
+async fn trash_delete(
+    state: &AppState,
+    index: &str,
+    row: &PruneCandidateItem,
+) -> Result<TrashedOutcome, ovis_core::CoreError> {
+    let recrawl_risk = row.recrawl_risk;
+    let snapshot = trash::capture(
+        &state.db,
+        &state.os,
+        index,
+        &row.document_id,
+        state.cfg.trash_keep_vectors,
+    )
+    .await?;
+
+    let provenance = trash::TrashProvenance {
+        candidate_id: Some(row.id),
+        policy_hash: None,
+        reasons: serde_json::to_value(&row.reasons).ok(),
+        deleted_by: ACTOR.to_string(),
+    };
+    let snapshot_bytes = trash::trash_and_delete(
+        &state.db,
+        &snapshot,
+        &provenance,
+        state.cfg.trash_retention_days,
+    )
+    .await?;
+
+    let (chunks_deleted, index_cleanup_pending) =
+        match state.os.delete_document_chunks(index, &row.document_id).await {
+            Ok(n) => (n, false),
+            Err(err) => {
+                tracing::warn!(
+                    document_id = %row.document_id,
+                    error = %err,
+                    "document trashed and removed from Postgres, but index cleanup failed; \
+                     queued for retry"
+                );
+                let _ = ovis_core::db::pending_deletes::enqueue(
+                    &state.db,
+                    &row.document_id,
+                    &err.to_string(),
+                )
+                .await;
+                (0, true)
+            }
+        };
+
+    Ok(TrashedOutcome {
+        chunks_deleted,
+        index_cleanup_pending,
+        recrawl_risk,
+        snapshot_bytes,
+        restorable_until: Utc::now() + ChronoDuration::days(state.cfg.trash_retention_days),
+    })
+}
+
+/// Drop snapshots whose retention has run out. This is the only irreversible
+/// step in the whole pruning system, and it is deliberately the slowest: it
+/// runs after everything else in the cycle, in bounded batches, and never
+/// touches a held snapshot.
+async fn purge_expired_trash(state: &AppState, report: &mut CycleReport) -> Result<(), AppError> {
+    let due = trash::due_for_purge(&state.db, state.cfg.trash_purge_batch_size).await?;
+    if due.is_empty() {
+        return Ok(());
+    }
+    let purged = trash::purge(&state.db, &due).await?;
+    report.purged = purged as i64;
+    db::audit(
+        &state.db,
+        ACTOR,
+        "trash_purged",
+        None,
+        None,
+        None,
+        Some(json!({
+            "count": purged,
+            "retention_days": state.cfg.trash_retention_days,
+            "reason": "retention_elapsed",
+        })),
+    )
+    .await;
+    tracing::info!(
+        purged,
+        retention_days = state.cfg.trash_retention_days,
+        "purged expired trash snapshots"
+    );
+    Ok(())
 }
 
 async fn remember_exclusion(state: &AppState, row: &PruneCandidateItem) {

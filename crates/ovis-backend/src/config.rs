@@ -81,6 +81,16 @@ pub struct ServerConfig {
     pub prune_scan_page_size: i64,
     /// Milliseconds the reaper sleeps between delete batches.
     pub prune_reaper_pause_ms: u64,
+    /// Days a deleted document's snapshot stays restorable in the trash.
+    /// Combined with `prune_grace_days`, this is the real window in which a
+    /// mistaken prune can be undone.
+    pub trash_retention_days: i64,
+    /// Capture embedding vectors into the snapshot. Costs roughly 10 kB per
+    /// document and is what lets a restored document answer semantic queries
+    /// immediately instead of waiting for a re-index.
+    pub trash_keep_vectors: bool,
+    /// Snapshots purged per reaper cycle once their retention ends.
+    pub trash_purge_batch_size: i64,
 }
 
 impl Default for ServerConfig {
@@ -118,6 +128,9 @@ impl Default for ServerConfig {
             prune_big_batch: 500,
             prune_scan_page_size: 1000,
             prune_reaper_pause_ms: 2000,
+            trash_retention_days: 30,
+            trash_keep_vectors: true,
+            trash_purge_batch_size: 200,
         }
     }
 }
@@ -244,6 +257,18 @@ impl ServerConfig {
         if self.prune_scan_page_size < 1 {
             return Err(ConfigError(
                 "OVIS_PRUNE_SCAN_PAGE_SIZE must be at least 1.".into(),
+            ));
+        }
+        if !(1..=365).contains(&self.trash_retention_days) {
+            return Err(ConfigError(
+                "OVIS_TRASH_RETENTION_DAYS must be between 1 and 365. Zero is not accepted: \
+                 a trash that empties immediately is not a trash."
+                    .into(),
+            ));
+        }
+        if self.trash_purge_batch_size < 1 {
+            return Err(ConfigError(
+                "OVIS_TRASH_PURGE_BATCH_SIZE must be at least 1.".into(),
             ));
         }
         Ok(())

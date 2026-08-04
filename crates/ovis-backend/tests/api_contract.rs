@@ -31,11 +31,43 @@ const INDEX: &str = "danswer_chunk_snowflake_arctic_embed_m";
 /// Serialise the tests: they share one database and each re-seeds it.
 static EXCLUSIVE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
+/// The shared advisory-lock key, identical in every database-backed suite (see
+/// `ovis-core/tests/common/mod.rs`). `cargo test` runs test binaries in
+/// parallel against one database, so the in-process mutex above is not enough.
+const DB_LOCK_KEY: i64 = 0x0715_0000_0000_0001;
+
+struct DbLock(#[allow(dead_code)] Option<sqlx::PgConnection>);
+
+impl DbLock {
+    async fn acquire(dsn: &str) -> Self {
+        use sqlx::Connection;
+        match sqlx::PgConnection::connect(dsn).await {
+            Ok(mut conn) => {
+                if let Err(err) = sqlx::query("SELECT pg_advisory_lock($1)")
+                    .bind(DB_LOCK_KEY)
+                    .execute(&mut conn)
+                    .await
+                {
+                    eprintln!("could not take the shared test-database lock: {err}");
+                    return Self(None);
+                }
+                Self(Some(conn))
+            }
+            Err(err) => {
+                eprintln!("could not open a lock connection: {err}");
+                Self(None)
+            }
+        }
+    }
+}
+
+
 struct Harness {
     app: axum::Router,
     state: AppState,
     /// The OpenSearch stand-in, kept alive for the test's duration.
     _os: MockServer,
+    _lock: DbLock,
     _guard: tokio::sync::MutexGuard<'static, ()>,
 }
 
@@ -205,6 +237,8 @@ async fn harness_with(mut configure: impl FnMut(&mut ServerConfig)) -> Option<Ha
     if dsn.trim().is_empty() {
         return None;
     }
+    // Cross-process lock before reseeding; see DbLock.
+    let lock = DbLock::acquire(&dsn).await;
 
     let os_server = mock_opensearch().await;
 
@@ -221,6 +255,7 @@ async fn harness_with(mut configure: impl FnMut(&mut ServerConfig)) -> Option<Ha
         .expect("test database");
     reseed(&db).await;
     let prune_enabled = ovis_core::db::prune::ensure_tables(&db).await;
+    let trash_enabled = ovis_core::db::trash::ensure_tables(&db).await;
 
     let os = OsClient::new(&cfg.opensearch_url, None, None).unwrap();
     let runtime = RuntimeMeta {
@@ -247,7 +282,7 @@ async fn harness_with(mut configure: impl FnMut(&mut ServerConfig)) -> Option<Ha
         cfg,
         build: BuildInfo::current(),
         pending_deletes_enabled: false,
-        prune: ovis_backend::state::PruneHandle::new(prune_enabled),
+        prune: ovis_backend::state::PruneHandle::new(prune_enabled, trash_enabled),
         metrics: None,
     };
 
@@ -255,6 +290,7 @@ async fn harness_with(mut configure: impl FnMut(&mut ServerConfig)) -> Option<Ha
         app: ovis_backend::app(state.clone()),
         state,
         _os: os_server,
+        _lock: lock,
         _guard: guard,
     })
 }

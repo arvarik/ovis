@@ -314,6 +314,116 @@ impl OsClient {
         Ok(deleted)
     }
 
+    /// Every chunk of one document as its verbatim `_id` and `_source`,
+    /// **including** the embedding vectors that [`Self::document_chunks`]
+    /// deliberately excludes.
+    ///
+    /// This is the trash snapshot's read path, and the reason a restored
+    /// document is searchable again the moment it comes back: the vectors
+    /// return with it, so nothing has to be re-embedded. Ordinary chunk
+    /// browsing must keep excluding vectors — 768 floats per chunk is a
+    /// hundredfold size increase for a UI that never displays them.
+    pub async fn document_chunks_raw(
+        &self,
+        index: &str,
+        document_id: &str,
+        after: Option<i64>,
+        size: i64,
+    ) -> CoreResult<(Vec<(String, Value)>, i64, Option<i64>)> {
+        let mut body = serde_json::json!({
+            "query": { "term": { "document_id": document_id } },
+            "sort": [{ "chunk_index": "asc" }],
+            "size": size,
+            "track_total_hits": true
+        });
+        if let Some(after) = after {
+            body["search_after"] = serde_json::json!([after]);
+        }
+        let response = self
+            .post(
+                &format!("{}/_search", encode_index(index)),
+                &body,
+                "fetch raw document chunks",
+            )
+            .await?;
+
+        let total = response["hits"]["total"]["value"].as_i64().unwrap_or(0);
+        let hits = response["hits"]["hits"].as_array().cloned().unwrap_or_default();
+        let items: Vec<(String, Value)> = hits
+            .iter()
+            .map(|hit| {
+                (
+                    hit["_id"].as_str().unwrap_or_default().to_string(),
+                    hit["_source"].clone(),
+                )
+            })
+            .collect();
+
+        let next_after = (items.len() as i64 == size)
+            .then(|| {
+                items
+                    .last()
+                    .and_then(|(_, src)| src["chunk_index"].as_i64())
+            })
+            .flatten();
+        Ok((items, total, next_after))
+    }
+
+    /// Re-index chunks verbatim under their original `_id`s — the trash
+    /// restore path.
+    ///
+    /// Uses `_bulk` with `index` (not `create`) actions so a restore is
+    /// idempotent: replaying it over chunks that already came back overwrites
+    /// them rather than erroring out halfway through.
+    pub async fn bulk_index_chunks(&self, index: &str, chunks: &[(String, Value)]) -> CoreResult<u64> {
+        if chunks.is_empty() {
+            return Ok(0);
+        }
+        let mut indexed = 0u64;
+        for batch in chunks.chunks(200) {
+            let mut ndjson = String::new();
+            for (id, source) in batch {
+                let action = serde_json::json!({ "index": { "_id": id } });
+                ndjson.push_str(&action.to_string());
+                ndjson.push('\n');
+                ndjson.push_str(&source.to_string());
+                ndjson.push('\n');
+            }
+            let url = format!(
+                "{}/{}/_bulk?refresh=true",
+                self.base_url,
+                encode_index(index)
+            );
+            let response = self
+                .send(
+                    self.client
+                        .post(&url)
+                        .header("Content-Type", "application/x-ndjson")
+                        .body(ndjson),
+                    "bulk index chunks",
+                )
+                .await?;
+            // `_bulk` answers 200 even when individual items failed; the
+            // per-item errors are the only honest signal.
+            if response["errors"].as_bool().unwrap_or(false) {
+                let first = response["items"]
+                    .as_array()
+                    .and_then(|items| {
+                        items
+                            .iter()
+                            .find_map(|item| item["index"]["error"]["reason"].as_str())
+                    })
+                    .unwrap_or("unknown");
+                return Err(CoreError::search(format!(
+                    "bulk index chunks: some items failed, first reason: {}",
+                    truncate(first, 300)
+                )));
+            }
+            indexed += response["items"].as_array().map(|i| i.len() as u64).unwrap_or(0);
+        }
+        Ok(indexed)
+    }
+
     pub async fn update_document_title(
         &self,
         index: &str,

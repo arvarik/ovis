@@ -823,19 +823,37 @@ pub async fn delete_document_cascading(
 /// OpenSearch call across a chunk of ids.
 pub async fn delete_document_pg_only(pool: &PgPool, id: &str) -> CoreResult<()> {
     let mut tx = pool.begin().await?;
+    delete_document_in_tx(&mut tx, id).await?;
+    tx.commit().await?;
+    Ok(())
+}
+
+/// The FK-complete cascade inside a caller-owned transaction.
+///
+/// Exists so the trash snapshot and the deletion it records can commit or roll
+/// back together: writing the snapshot in a separate transaction would allow a
+/// crash to leave a document deleted with no way back, which is the one
+/// outcome the trash exists to prevent.
+///
+/// Callers are responsible for committing. Returns `NotFound` (leaving the
+/// transaction to be rolled back) when the row was already gone.
+pub async fn delete_document_in_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    id: &str,
+) -> CoreResult<()> {
     for (table, column) in DOCUMENT_FK_CHILD_TABLES {
+        // Table and column names come from the const above, never from input.
         let sql = format!("DELETE FROM public.{table} WHERE {column} = $1");
-        sqlx::query(&sql).bind(id).execute(&mut *tx).await?;
+        sqlx::query(&sql).bind(id).execute(&mut **tx).await?;
     }
     let deleted = sqlx::query("DELETE FROM public.document WHERE id = $1")
         .bind(id)
-        .execute(&mut *tx)
+        .execute(&mut **tx)
         .await?
         .rows_affected();
     if deleted == 0 {
         return Err(CoreError::not_found("document", id));
     }
-    tx.commit().await?;
     Ok(())
 }
 

@@ -12,7 +12,12 @@
 pub mod config;
 pub mod content;
 pub mod dedup;
+pub mod quality;
+pub mod urlkey;
 
 pub use config::*;
 pub use content::*;
 pub use dedup::*;
+// `quality` and `urlkey` are namespaced rather than glob-exported: both have
+// short, generic names (`measure`, `evaluate`, `classify`) that would collide
+// on sight at a call site.

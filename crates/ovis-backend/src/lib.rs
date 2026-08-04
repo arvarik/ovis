@@ -180,6 +180,14 @@ pub async fn build_state(cfg: ServerConfig) -> anyhow::Result<AppState> {
 
     let pending_deletes_enabled = ovis_core::db::pending_deletes::ensure_table(&db).await;
     let prune_enabled = ovis_core::db::prune::ensure_tables(&db).await;
+    let trash_enabled = ovis_core::db::trash::ensure_tables(&db).await;
+    if prune_enabled && !trash_enabled {
+        tracing::error!(
+            "pruning is enabled but ovis.trash_document could not be created; the reaper will \
+             refuse to delete. Deleting without a snapshot would be irreversible, which is \
+             exactly what the trash exists to prevent."
+        );
+    }
 
     let metrics = install_metrics_recorder();
 
@@ -193,7 +201,7 @@ pub async fn build_state(cfg: ServerConfig) -> anyhow::Result<AppState> {
         cfg,
         build: BuildInfo::current(),
         pending_deletes_enabled,
-        prune: crate::state::PruneHandle::new(prune_enabled),
+        prune: crate::state::PruneHandle::new(prune_enabled, trash_enabled),
         metrics,
     })
 }
