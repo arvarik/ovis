@@ -889,6 +889,10 @@ pub struct PruneStatusResponse {
     /// The currently running or queued scan, if any.
     pub active_scan: Option<PruneScanItem>,
     pub limits: PruneLimits,
+    /// Deleted documents still restorable from the trash. Part of status
+    /// rather than a separate call because the recovery window belongs next to
+    /// the deletion counts, not one tab away from them.
+    pub trash: crate::db::trash::TrashCounts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

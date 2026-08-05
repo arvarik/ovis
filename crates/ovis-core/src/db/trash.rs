@@ -759,7 +759,7 @@ pub async fn get_snapshot(pool: &PgPool, document_id: &str) -> CoreResult<Option
     }
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct TrashCounts {
     pub items: i64,
     pub bytes: i64,

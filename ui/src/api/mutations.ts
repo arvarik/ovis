@@ -27,6 +27,9 @@ import type {
   PagePatch,
   PatchResponse,
   RunOnceRequest,
+  PrunePolicy,
+  PruneCommitResponse,
+  TrashBulkResponse,
 } from './types';
 import { count as formatCount } from '@/lib/format';
 
@@ -515,5 +518,100 @@ export function usePruneConfigImport() {
       });
     },
     onError: (error) => errorToast('Config import failed', error),
+  });
+}
+
+// --- prune v2: policy commit and trash ---
+
+export function usePruneCommitPolicy() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      tier?: string;
+      policy?: PrunePolicy;
+      band: string;
+      confirm_count: number;
+      save_as?: string;
+    }) => api.post<PruneCommitResponse>('/prune/policies/commit', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      toast.success(`${formatCount(res.created)} candidates created`, {
+        description:
+          res.skipped > 0
+            ? `${formatCount(res.skipped)} skipped — already under review or excluded. Nothing is hidden or deleted yet.`
+            : 'Nothing is hidden or deleted yet — review, then stage.',
+      });
+    },
+    onError: (error) => pruneBulkErrorToast('Commit failed', error, queryClient),
+  });
+}
+
+export function useTrashRestore() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      document_ids?: string[];
+      filter?: Record<string, unknown>;
+      confirm_count?: number;
+      overwrite?: boolean;
+    }) => api.post<TrashBulkResponse>('/prune/trash/restore', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      const pending = res.outcomes.filter((o) => o.index_restore_pending).length;
+      toast.success(`${formatCount(res.changed)} restored`, {
+        description: pending
+          ? `${formatCount(pending)} still have chunks queued for re-indexing; they are back in Onyx and searchable once that drains.`
+          : 'Back in Onyx with their chunks and vectors — searchable immediately.',
+      });
+      const firstFailure = res.failed[0];
+      if (firstFailure) {
+        toast.error(`${formatCount(res.failed.length)} could not be restored`, {
+          description: firstFailure.message,
+        });
+      }
+    },
+    onError: (error) => errorToast('Restore failed', error),
+  });
+}
+
+export function useTrashPurge() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      document_ids?: string[];
+      filter?: Record<string, unknown>;
+      confirm_count?: number;
+      typed_count: number;
+    }) => api.post<TrashBulkResponse>('/prune/trash/purge', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      toast.success(`${formatCount(res.changed)} permanently destroyed`, {
+        description: 'This cannot be undone.',
+      });
+      const firstFailure = res.failed[0];
+      if (firstFailure) {
+        toast.error(`${formatCount(res.failed.length)} skipped`, {
+          description: firstFailure.message,
+        });
+      }
+    },
+    onError: (error) => errorToast('Purge failed', error),
+  });
+}
+
+export function useTrashHold() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { document_ids: string[]; hold: boolean }) =>
+      api.post<TrashBulkResponse>('/prune/trash/hold', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      toast.success(
+        res.action === 'held'
+          ? `${formatCount(res.changed)} held — exempt from automatic purge`
+          : `${formatCount(res.changed)} released back to the retention clock`,
+      );
+    },
+    onError: (error) => errorToast('Hold failed', error),
   });
 }

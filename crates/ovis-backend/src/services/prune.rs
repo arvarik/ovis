@@ -239,6 +239,7 @@ pub async fn status(state: &AppState) -> Result<PruneStatusResponse, AppError> {
             deleted_last_hour: counts.deleted_last_hour,
         },
         active_scan,
+        trash: ovis_core::db::trash::counts(&state.db).await.unwrap_or_default(),
         limits: PruneLimits {
             grace_days: state.cfg.prune_grace_days,
             big_batch: state.cfg.prune_big_batch,

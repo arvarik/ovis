@@ -28,6 +28,12 @@ import type {
   TagFacet,
   TimelineResponse,
   TopConnector,
+  PruneOverviewResponse,
+  PruneHistogramBucket,
+  PruneCluster,
+  PruneSamplePlan,
+  TrashItem,
+  TrashDetail,
 } from './types';
 import type { PagesSearch } from '@/routes/pages';
 
@@ -374,5 +380,64 @@ export function presetCountQuery(params: QueryParams) {
       return { total: res.total, exact: res.total_exact };
     },
     staleTime: 60_000,
+  });
+}
+
+// --- prune v2 ---
+
+export const pruneOverviewQuery = queryOptions({
+  queryKey: ['prune', 'overview'],
+  queryFn: ({ signal }) =>
+    api.get<PruneOverviewResponse>('/prune/overview', undefined, signal),
+  staleTime: 5_000,
+});
+
+export function pruneHistogramQuery(signal_: string, buckets = 20) {
+  return queryOptions({
+    queryKey: ['prune', 'histogram', signal_, buckets],
+    queryFn: ({ signal }) =>
+      api.get<{ signal: string; buckets: PruneHistogramBucket[] }>(
+        '/prune/histogram',
+        { signal: signal_, buckets },
+        signal,
+      ),
+    staleTime: 30_000,
+  });
+}
+
+export function pruneClustersQuery(method: string, limit = 20) {
+  return queryOptions({
+    queryKey: ['prune', 'clusters', method, limit],
+    queryFn: ({ signal }) =>
+      api.get<{ items: PruneCluster[] }>('/prune/clusters', { method, limit }, signal),
+    staleTime: 10_000,
+  });
+}
+
+export function pruneSampleQuery(params: QueryParams) {
+  return queryOptions({
+    queryKey: ['prune', 'sample', params],
+    queryFn: ({ signal }) => api.get<PruneSamplePlan>('/prune/sample', params, signal),
+    // A sample is a draw, not a cached fact: refetching must redraw.
+    staleTime: 0,
+    gcTime: 0,
+  });
+}
+
+export function trashQuery(params: QueryParams) {
+  return queryOptions({
+    queryKey: ['prune', 'trash', params],
+    queryFn: ({ signal }) =>
+      api.get<ListResponse<TrashItem>>('/prune/trash', params, signal),
+    staleTime: 5_000,
+  });
+}
+
+export function trashDetailQuery(documentId: string) {
+  return queryOptions({
+    queryKey: ['prune', 'trash', 'detail', documentId],
+    queryFn: ({ signal }) =>
+      api.get<TrashDetail>(`/prune/trash/${encodeURIComponent(documentId)}`, undefined, signal),
+    staleTime: 30_000,
   });
 }

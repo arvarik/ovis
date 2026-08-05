@@ -494,7 +494,10 @@ export type PruneReasonDetector =
   | 'tag_rule'
   | 'thin'
   | 'stale'
-  | 'recrawl';
+  | 'recrawl'
+  | 'quality'
+  | 'url_junk'
+  | 'policy';
 
 export interface PruneReason {
   detector: PruneReasonDetector;
@@ -644,6 +647,7 @@ export interface PruneStatusResponse {
   reaper: PruneReaperStatus;
   active_scan: PruneScanItem | null;
   limits: PruneLimits;
+  trash: TrashCounts;
 }
 
 export interface PruneRuleItem {
@@ -697,4 +701,188 @@ export interface ApiErrorBody {
     status: number;
     req_id: string;
   };
+}
+
+// ---------------------------------------------------------------------------
+// Prune v2 — triage, policy, clusters, trash
+// ---------------------------------------------------------------------------
+
+/** What a policy decides for one document. */
+export type PruneBand = 'auto' | 'review' | 'none';
+
+export interface PruneBundle {
+  key: string;
+  title: string;
+  description: string;
+  detector: string | null;
+  documents: number;
+  chunks: number;
+  mean_confidence: number;
+  recrawl_risk: number;
+}
+
+export interface PruneConnectorBundle {
+  connector_id: number | null;
+  connector_name: string | null;
+  documents: number;
+  chunks: number;
+  mean_confidence: number;
+}
+
+export interface TrashCounts {
+  items: number;
+  bytes: number;
+  expiring_7d: number;
+  on_hold: number;
+  restored_total: number;
+  soonest_expiry: string | null;
+}
+
+export interface PruneOverviewResponse {
+  candidates_open: number;
+  documents_total: number;
+  profiled: number;
+  pairs: number;
+  bundles: PruneBundle[];
+  by_connector: PruneConnectorBundle[];
+  trash: TrashCounts;
+}
+
+export interface PruneThreshold {
+  auto: number | null;
+  review: number | null;
+}
+
+export interface PruneQualityThreshold {
+  review_min_failures: number | null;
+  min_families: number;
+  auto_min_failures: number | null;
+}
+
+export interface PrunePolicy {
+  exact_duplicate: PruneBand;
+  url_variant: PruneBand;
+  asset: PruneBand;
+  stub: PruneBand;
+  near_duplicate: PruneThreshold;
+  semantic: PruneThreshold;
+  quality: PruneQualityThreshold;
+  off_topic_percentile: number | null;
+  exempt_connectors: string[];
+  cross_connector_review_only: boolean;
+}
+
+export interface PruneSignalCount {
+  signal: string;
+  band: string;
+  count: number;
+}
+
+export interface PruneSampleDoc {
+  document_id: string;
+  semantic_id: string | null;
+  chunk_count: number | null;
+  signals: string[];
+}
+
+export interface PruneSimulateResponse {
+  tier: string | null;
+  policy: PrunePolicy;
+  policy_hash: string;
+  profiled: number;
+  auto: number;
+  review: number;
+  untouched: number;
+  by_signal: PruneSignalCount[];
+  by_connector: { connector_id: number | null; connector_name: string | null; auto: number; review: number }[];
+  auto_sample: PruneSampleDoc[];
+  review_sample: PruneSampleDoc[];
+  /** What these numbers do not cover — shown, never inferred from a zero. */
+  caveats: string[];
+}
+
+export interface PruneCommitResponse {
+  band: string;
+  policy_hash: string;
+  created: number;
+  skipped: number;
+  saved_as: string | null;
+}
+
+export interface PruneHistogramBucket {
+  lower: number;
+  upper: number;
+  count: number;
+}
+
+export interface PruneClusterMember {
+  document_id: string;
+  semantic_id: string | null;
+  link: string | null;
+  chunk_count: number | null;
+  updated_at: string | null;
+  is_keeper: boolean;
+  candidate_id: number | null;
+}
+
+export interface PruneCluster {
+  key: string;
+  method: string;
+  size: number;
+  members: PruneClusterMember[];
+  keeper_reason: string;
+}
+
+export interface PruneSamplePlan {
+  population: number;
+  sample_size: number;
+  max_failures: number;
+  confidence: number;
+  max_error_rate: number;
+  statement: string;
+  documents: PruneSampleDoc[];
+}
+
+export interface TrashItem {
+  document_id: string;
+  semantic_id: string | null;
+  connector_id: number | null;
+  connector_name: string | null;
+  chunk_count: number;
+  snapshot_bytes: number;
+  vectors_included: boolean;
+  reasons: PruneReason[] | null;
+  policy_hash: string | null;
+  deleted_by: string;
+  deleted_at: string;
+  expires_at: string;
+  hold: boolean;
+  /** The id exists in Onyx again — restoring would collide. */
+  reappeared: boolean;
+}
+
+export interface TrashDetail extends TrashItem {
+  text: string;
+  chunk_previews: string[];
+  document: Record<string, unknown>;
+  tags: Record<string, unknown>[];
+}
+
+export interface TrashRestoreOutcome {
+  document_id: string;
+  chunks_restored: number;
+  tags_restored: number;
+  cc_pairs_restored: number;
+  skipped_tags: number;
+  skipped_cc_pairs: number;
+  index_restore_pending: boolean;
+}
+
+export interface TrashBulkResponse {
+  success: boolean;
+  requested: number;
+  changed: number;
+  failed: { document_id: string; code: string; message: string }[];
+  action: string;
+  outcomes: TrashRestoreOutcome[];
 }

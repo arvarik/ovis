@@ -10,15 +10,25 @@ import type { PruneStatusResponse } from '@/api/types';
 import { Stat } from '@/components/primitives/Stat';
 import { TabsContent, TabsList, TabsRoot, TabsTrigger } from '@/components/primitives/Tabs';
 import { count as formatCount } from '@/lib/format';
+import { ClustersTab } from './ClustersTab';
 import { HistoryTab } from './HistoryTab';
 import { graceCountdown, useNow } from './pruneShared';
 import { ReviewTab } from './ReviewTab';
 import { RulesTab } from './RulesTab';
 import { StagedTab } from './StagedTab';
+import { TrashTab } from './TrashTab';
+import { TriageTab } from './TriageTab';
 
 const route = getRouteApi('/prune');
 
-export type PruneTab = 'review' | 'staged' | 'rules' | 'history';
+export type PruneTab =
+  | 'triage'
+  | 'review'
+  | 'clusters'
+  | 'staged'
+  | 'trash'
+  | 'rules'
+  | 'history';
 
 export function PruneView() {
   const { tab } = route.useSearch();
@@ -30,8 +40,9 @@ export function PruneView() {
       <header>
         <h1 className="font-display font-display-soft text-headline text-ink">Prune</h1>
         <p className="mt-1 text-label text-ink-mute">
-          Find junk, review the evidence, stage reversibly. Deletion happens only in the reaper,
-          after the grace period.
+          Find junk, review it in groups, stage reversibly. Deletion happens only in the
+          reaper, after the grace period — and what it deletes goes to the trash, where it
+          stays restorable.
         </p>
       </header>
 
@@ -44,18 +55,39 @@ export function PruneView() {
         }
       >
         <TabsList>
+          <TabsTrigger value="triage">Triage</TabsTrigger>
           <TabsTrigger value="review">Review</TabsTrigger>
+          <TabsTrigger value="clusters">Clusters</TabsTrigger>
           <TabsTrigger value="staged">
             Staged{status.data && status.data.staged > 0 ? ` · ${formatCount(status.data.staged)}` : ''}
+          </TabsTrigger>
+          <TabsTrigger value="trash">
+            Trash{status.data && status.data.trash ? ` · ${formatCount(status.data.trash.items)}` : ''}
           </TabsTrigger>
           <TabsTrigger value="rules">Rules</TabsTrigger>
           <TabsTrigger value="history">History</TabsTrigger>
         </TabsList>
+        <TabsContent value="triage" className="pt-4">
+          <TriageTab
+            onOpenBundle={(bundle) =>
+              void navigate({
+                search: { tab: 'review', detector: bundle.detector ?? undefined },
+                replace: true,
+              })
+            }
+          />
+        </TabsContent>
         <TabsContent value="review" className="pt-4">
           <ReviewTab />
         </TabsContent>
+        <TabsContent value="clusters" className="pt-4">
+          <ClustersTab />
+        </TabsContent>
         <TabsContent value="staged" className="pt-4">
           <StagedTab />
+        </TabsContent>
+        <TabsContent value="trash" className="pt-4">
+          <TrashTab />
         </TabsContent>
         <TabsContent value="rules" className="pt-4">
           <RulesTab />
