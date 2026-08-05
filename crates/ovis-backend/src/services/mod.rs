@@ -9,6 +9,8 @@ pub mod pages;
 pub mod prune;
 pub mod prune_reaper;
 pub mod prune_scan;
+pub mod prune_triage;
 pub mod search;
 pub mod stats;
+pub mod trash;
 pub mod system;

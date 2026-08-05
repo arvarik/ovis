@@ -17,6 +17,8 @@ use crate::error::AppError;
 use crate::extract::{decode_path_id, Json, Query};
 use crate::services::pages as pages_service;
 use crate::services::prune as service;
+use crate::services::prune_triage as triage;
+use crate::services::trash as trash_service;
 use crate::state::AppState;
 
 pub async fn status(State(state): State<AppState>) -> Result<Response, AppError> {
@@ -286,4 +288,152 @@ mod tests {
         assert_eq!(parsed.limit, Some(25));
         assert_eq!(parsed.page, Some(2));
     }
+}
+
+// ---------------------------------------------------------------------------
+// v2 — triage, policy, clusters, sampling, trash
+// ---------------------------------------------------------------------------
+
+pub async fn overview(State(state): State<AppState>) -> Result<Response, AppError> {
+    Ok(axum::Json(triage::overview(&state).await?).into_response())
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct HistogramQuery {
+    pub signal: String,
+    pub buckets: Option<i64>,
+}
+
+pub async fn histogram(
+    State(state): State<AppState>,
+    Query(query): Query<HistogramQuery>,
+) -> Result<Response, AppError> {
+    service::guard(&state)?;
+    let buckets = query.buckets.unwrap_or(20);
+    let buckets = ovis_core::db::profile::histogram(&state.db, &query.signal, buckets).await?;
+    Ok(axum::Json(serde_json::json!({
+        "signal": query.signal,
+        "buckets": buckets,
+    }))
+    .into_response())
+}
+
+pub async fn simulate(
+    State(state): State<AppState>,
+    Json(body): Json<triage::SimulateRequest>,
+) -> Result<Response, AppError> {
+    Ok(axum::Json(triage::simulate(&state, body).await?).into_response())
+}
+
+pub async fn commit_policy(
+    State(state): State<AppState>,
+    Json(body): Json<triage::CommitRequest>,
+) -> Result<Response, AppError> {
+    Ok(axum::Json(triage::commit(&state, body).await?).into_response())
+}
+
+pub async fn list_policies(State(state): State<AppState>) -> Result<Response, AppError> {
+    service::guard(&state)?;
+    let policies = ovis_core::db::profile::list_policies(&state.db).await?;
+    Ok(axum::Json(serde_json::json!({ "items": policies })).into_response())
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct ClustersQuery {
+    pub method: Option<String>,
+    pub after: Option<String>,
+    pub limit: Option<i64>,
+}
+
+pub async fn clusters(
+    State(state): State<AppState>,
+    Query(query): Query<ClustersQuery>,
+) -> Result<Response, AppError> {
+    let clusters = triage::clusters(
+        &state,
+        query.method.as_deref(),
+        query.after.as_deref(),
+        query.limit.unwrap_or(20),
+    )
+    .await?;
+    Ok(axum::Json(serde_json::json!({ "items": clusters })).into_response())
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SampleQuery {
+    pub detector: Option<String>,
+    pub code: Option<String>,
+    pub n: Option<i64>,
+}
+
+pub async fn sample(
+    State(state): State<AppState>,
+    Query(query): Query<SampleQuery>,
+) -> Result<Response, AppError> {
+    let plan = triage::sample(
+        &state,
+        query.detector.as_deref(),
+        query.code.as_deref(),
+        query.n.unwrap_or(60),
+    )
+    .await?;
+    Ok(axum::Json(plan).into_response())
+}
+
+// --- trash ---
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct TrashQuery {
+    pub connector_id: Option<i32>,
+    pub document_id: Option<String>,
+    pub hold: Option<bool>,
+    pub expiring_within_days: Option<i64>,
+    pub limit: Option<i64>,
+    pub page: Option<i64>,
+}
+
+pub async fn trash_list(
+    State(state): State<AppState>,
+    Query(query): Query<TrashQuery>,
+) -> Result<Response, AppError> {
+    Ok(axum::Json(trash_service::list(&state, query).await?).into_response())
+}
+
+pub async fn trash_detail(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Response, AppError> {
+    let id = decode_path_id(&id);
+    Ok(axum::Json(trash_service::detail(&state, &id).await?).into_response())
+}
+
+pub async fn trash_restore(
+    State(state): State<AppState>,
+    Json(body): Json<trash_service::TrashBulkRequest>,
+) -> Result<Response, AppError> {
+    let response = trash_service::restore(&state, body).await?;
+    let status = if response.success {
+        axum::http::StatusCode::OK
+    } else {
+        axum::http::StatusCode::MULTI_STATUS
+    };
+    Ok((status, axum::Json(response)).into_response())
+}
+
+pub async fn trash_purge(
+    State(state): State<AppState>,
+    Json(body): Json<trash_service::TrashBulkRequest>,
+) -> Result<Response, AppError> {
+    Ok(axum::Json(trash_service::purge(&state, body).await?).into_response())
+}
+
+pub async fn trash_hold(
+    State(state): State<AppState>,
+    Json(body): Json<trash_service::TrashHoldRequest>,
+) -> Result<Response, AppError> {
+    Ok(axum::Json(trash_service::set_hold(&state, body).await?).into_response())
 }

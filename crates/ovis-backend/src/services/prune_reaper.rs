@@ -489,7 +489,7 @@ async fn trash_delete(
     row: &PruneCandidateItem,
 ) -> Result<TrashedOutcome, ovis_core::CoreError> {
     let recrawl_risk = row.recrawl_risk;
-    let snapshot = trash::capture(
+    let mut snapshot = trash::capture(
         &state.db,
         &state.os,
         index,
@@ -497,6 +497,17 @@ async fn trash_delete(
         state.cfg.trash_keep_vectors,
     )
     .await?;
+
+    // Staging sets `hidden` on the way to deletion, so a snapshot taken at
+    // delete time records the *pruning process*, not the document. Restoring
+    // that verbatim would hand back a document invisible to search, which is
+    // not what "put it back" means. `prev_hidden` is the flag the document
+    // carried before pruning touched it, and that is what the snapshot keeps.
+    if let Some(prev_hidden) = row.prev_hidden {
+        if let Some(document) = snapshot.document.as_object_mut() {
+            document.insert("hidden".into(), serde_json::Value::Bool(prev_hidden));
+        }
+    }
 
     let provenance = trash::TrashProvenance {
         candidate_id: Some(row.id),

@@ -129,6 +129,19 @@ pub fn api_router(state: AppState) -> Router {
             "/prune/config",
             get(prune::export_config).put(prune::import_config),
         )
+        // --- prune v2: triage, policy, clusters, sampling, trash ---
+        .route("/prune/overview", get(prune::overview))
+        .route("/prune/histogram", get(prune::histogram))
+        .route("/prune/simulate", post(prune::simulate))
+        .route("/prune/policies", get(prune::list_policies))
+        .route("/prune/policies/commit", post(prune::commit_policy))
+        .route("/prune/clusters", get(prune::clusters))
+        .route("/prune/sample", get(prune::sample))
+        .route("/prune/trash", get(prune::trash_list))
+        .route("/prune/trash/restore", post(prune::trash_restore))
+        .route("/prune/trash/purge", post(prune::trash_purge))
+        .route("/prune/trash/hold", post(prune::trash_hold))
+        .route("/prune/trash/{id}", get(prune::trash_detail))
         .route("/prune/audit", get(prune::audit))
         .route("/prune/exclusions", get(prune::exclusions))
         .route("/prune/exclusions/{id}", delete(prune::delete_exclusion))

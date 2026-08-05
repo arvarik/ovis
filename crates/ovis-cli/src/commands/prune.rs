@@ -9,7 +9,7 @@
 //! and `--now` does not exist.
 
 use ovis_core::api_types::{
-    PruneBulkResponse, PruneCandidateDetail, PruneCandidateFilterBody, PruneCandidateItem,
+    PruneBulkResponse, PruneCandidateFilterBody, PruneCandidateItem,
     PruneDismissRequest, PruneReason, PruneRestoreRequest, PruneRuleCreate, PruneRuleItem,
     PruneRulePatch, PruneScanItem, PruneScanRequest, PruneScheduleDeleteRequest, PruneScope,
     PruneStageRequest, PruneStatusResponse,

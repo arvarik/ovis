@@ -329,6 +329,18 @@ async fn reseed(pool: &sqlx::PgPool) {
         "prune_exclusions",
         "prune_rules",
         "pending_index_deletes",
+        // v2 tables. The trash in particular is keyed by document id, so a
+        // snapshot left by an earlier test makes the next one's counts wrong
+        // in a way that reads like a product bug.
+        "trash_document",
+        "pending_index_restores",
+        "doc_profile",
+        "dup_pair",
+        "prune_policy",
+        // Persisted MinHash signatures outlive a public reseed too, and the
+        // near-duplicate tests assert on how many were written.
+        "prune_minhash_band",
+        "prune_minhash",
     ] {
         let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))
             .execute(pool)
@@ -2000,4 +2012,502 @@ async fn near_duplicate_pairs_are_stored_for_later_rethresholding() {
     .await
     .unwrap();
     assert!(max_jaccard.unwrap() >= 0.8);
+}
+
+// ===========================================================================
+// v2 — triage, simulation, and the trash, over HTTP
+// ===========================================================================
+
+/// The funnel groups the backlog into a handful of reviewable bundles instead
+/// of one very long list.
+#[tokio::test]
+async fn the_overview_groups_candidates_into_described_bundles() {
+    let Some(h) = harness().await else {
+        return skip("the_overview_groups_candidates_into_described_bundles");
+    };
+    run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["thin", "exact_duplicate", "url_junk"]),
+    )
+    .await;
+
+    let body = get(&h.app, "/api/v1/prune/overview").await.json();
+    assert!(body["candidates_open"].as_i64().unwrap() > 0);
+    assert!(body["profiled"].as_i64().unwrap() > 0);
+    assert_eq!(body["documents_total"].as_i64().unwrap(), 24);
+
+    let bundles = body["bundles"].as_array().unwrap();
+    assert!(!bundles.is_empty(), "the backlog must be grouped: {body}");
+    for bundle in bundles {
+        assert!(!bundle["title"].as_str().unwrap().is_empty());
+        assert!(
+            bundle["description"].as_str().unwrap().len() > 40,
+            "each bundle explains itself: {bundle}"
+        );
+        assert!(bundle["documents"].as_i64().unwrap() > 0);
+    }
+    // Reclaim weight is reported, since that is what deleting actually buys.
+    assert!(bundles.iter().any(|b| b["chunks"].as_i64().unwrap() > 0));
+
+    // Trash counts ride along so the shell can show the recovery window.
+    assert_eq!(body["trash"]["items"], 0);
+}
+
+/// Simulating a policy reports what it would do and changes nothing.
+#[tokio::test]
+async fn simulating_a_policy_reports_bands_without_creating_anything() {
+    let Some(h) = harness().await else {
+        return skip("simulating_a_policy_reports_bands_without_creating_anything");
+    };
+    // Profiles only — no candidates yet.
+    run_scan(&h, json!({ "kind": "all" }), json!(["quality", "url_junk"])).await;
+
+    let before: i64 = sqlx::query_scalar("SELECT count(*) FROM ovis.prune_candidate")
+        .fetch_one(&h.state.db)
+        .await
+        .unwrap();
+
+    let reply = post_json(
+        &h.app,
+        "/api/v1/prune/simulate",
+        json!({ "tier": "standard", "sample": 5 }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.json();
+
+    assert_eq!(body["tier"], "standard");
+    assert!(body["profiled"].as_i64().unwrap() > 0, "{body}");
+    let auto = body["auto"].as_i64().unwrap();
+    let review = body["review"].as_i64().unwrap();
+    let untouched = body["untouched"].as_i64().unwrap();
+    assert_eq!(
+        auto + review + untouched,
+        body["profiled"].as_i64().unwrap(),
+        "the three bands must partition the profiled set: {body}"
+    );
+    assert!(auto > 0, "stubs and duplicates should reach the auto band: {body}");
+
+    // Boundary samples let a threshold be checked against real documents.
+    assert!(
+        !body["auto_sample"].as_array().unwrap().is_empty(),
+        "a sample must be drawn: {body}"
+    );
+    assert!(
+        !body["auto_sample"][0]["signals"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "each sampled document says which signals put it there"
+    );
+
+    let after: i64 = sqlx::query_scalar("SELECT count(*) FROM ovis.prune_candidate")
+        .fetch_one(&h.state.db)
+        .await
+        .unwrap();
+    assert_eq!(before, after, "simulation must not create candidates");
+}
+
+/// The three presets are ordered, and the ordering is visible in the counts.
+#[tokio::test]
+async fn presets_are_ordered_from_conservative_to_aggressive() {
+    let Some(h) = harness().await else {
+        return skip("presets_are_ordered_from_conservative_to_aggressive");
+    };
+    run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["quality", "url_junk", "near_duplicate"]),
+    )
+    .await;
+
+    let mut totals = Vec::new();
+    for tier in ["conservative", "standard", "aggressive"] {
+        let reply = post_json(&h.app, "/api/v1/prune/simulate", json!({ "tier": tier })).await;
+        assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+        let body = reply.json();
+        totals.push(body["auto"].as_i64().unwrap() + body["review"].as_i64().unwrap());
+    }
+    assert!(
+        totals[0] <= totals[1] && totals[1] <= totals[2],
+        "each preset must catch at least as much as the last: {totals:?}"
+    );
+}
+
+/// A policy body that cannot mean what it says is refused before it runs.
+#[tokio::test]
+async fn an_incoherent_policy_is_refused_with_the_reason() {
+    let Some(h) = harness().await else {
+        return skip("an_incoherent_policy_is_refused_with_the_reason");
+    };
+    let reply = post_json(
+        &h.app,
+        "/api/v1/prune/simulate",
+        json!({ "policy": { "near_duplicate": { "auto": 0.5, "review": 0.9 } } }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{}", reply.body);
+    assert!(reply.body.contains("stronger claim"), "{}", reply.body);
+
+    let reply = post_json(&h.app, "/api/v1/prune/simulate", json!({ "tier": "nuclear" })).await;
+    assert_eq!(reply.status, StatusCode::BAD_REQUEST);
+    assert!(reply.body.contains("conservative"), "{}", reply.body);
+}
+
+/// Committing a policy turns a band into candidates, and the count has to
+/// match what the caller last simulated.
+#[tokio::test]
+async fn committing_a_policy_requires_the_simulated_count() {
+    let Some(h) = harness().await else {
+        return skip("committing_a_policy_requires_the_simulated_count");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["quality", "url_junk"])).await;
+
+    let simulated = post_json(&h.app, "/api/v1/prune/simulate", json!({ "tier": "standard" }))
+        .await
+        .json();
+    let auto = simulated["auto"].as_i64().unwrap();
+    assert!(auto > 0);
+
+    // A stale count is a 409 and nothing is created.
+    let stale = post_json(
+        &h.app,
+        "/api/v1/prune/policies/commit",
+        json!({ "tier": "standard", "band": "auto", "confirm_count": auto + 1 }),
+    )
+    .await;
+    assert_eq!(stale.status, StatusCode::CONFLICT, "{}", stale.body);
+    assert!(stale.body.contains(&auto.to_string()), "{}", stale.body);
+
+    let reply = post_json(
+        &h.app,
+        "/api/v1/prune/policies/commit",
+        json!({
+            "tier": "standard",
+            "band": "auto",
+            "confirm_count": auto,
+            "save_as": "house-standard"
+        }),
+    )
+    .await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.json();
+    assert_eq!(body["created"], auto);
+    assert_eq!(body["saved_as"], "house-standard");
+
+    // The saved policy is now the active one.
+    let policies = get(&h.app, "/api/v1/prune/policies").await.json();
+    let saved = policies["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|p| p["name"] == "house-standard")
+        .expect("the policy was saved");
+    assert_eq!(saved["active"], true);
+    assert_eq!(saved["tier"], "standard");
+
+    // Candidates carry the policy provenance.
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=5").await.json();
+    let policy_candidate = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["reasons"][0]["detector"] == "policy")
+        .expect("a policy-created candidate");
+    assert_eq!(policy_candidate["reasons"][0]["evidence"]["band"], "auto");
+    assert!(!policy_candidate["reasons"][0]["evidence"]["policy_hash"]
+        .as_str()
+        .unwrap()
+        .is_empty());
+}
+
+/// Duplicate clusters are returned whole, keeper first — the unit of review.
+#[tokio::test]
+async fn clusters_return_the_whole_group_with_its_keeper() {
+    let Some(h) = harness().await else {
+        return skip("clusters_return_the_whole_group_with_its_keeper");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["exact_duplicate"])).await;
+
+    let body = get(&h.app, "/api/v1/prune/clusters?method=hash&limit=10")
+        .await
+        .json();
+    let clusters = body["items"].as_array().unwrap();
+    assert!(!clusters.is_empty(), "{body}");
+
+    let cluster = &clusters[0];
+    assert_eq!(cluster["method"], "hash");
+    let members = cluster["members"].as_array().unwrap();
+    assert!(members.len() >= 2, "a cluster has at least two members");
+    assert_eq!(
+        members[0]["is_keeper"], true,
+        "the keeper is listed first so review starts from what survives"
+    );
+    assert_eq!(
+        members.iter().filter(|m| m["is_keeper"] == true).count(),
+        1,
+        "exactly one keeper per cluster"
+    );
+    assert!(
+        !cluster["keeper_reason"].as_str().unwrap().is_empty(),
+        "the UI must be able to say why this member survives"
+    );
+    // Non-keepers link to their candidate row so the cluster can be actioned.
+    assert!(members
+        .iter()
+        .filter(|m| m["is_keeper"] == false)
+        .all(|m| m["candidate_id"].is_i64()));
+}
+
+/// The sampling plan states, in words, what accepting the sample would mean.
+#[tokio::test]
+async fn the_sampling_plan_states_its_statistical_claim() {
+    let Some(h) = harness().await else {
+        return skip("the_sampling_plan_states_its_statistical_claim");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["thin", "exact_duplicate"])).await;
+
+    let body = get(&h.app, "/api/v1/prune/sample?detector=duplicate&n=3")
+        .await
+        .json();
+    assert!(body["population"].as_i64().unwrap() > 0, "{body}");
+    assert!(body["sample_size"].as_i64().unwrap() > 0);
+    assert_eq!(body["confidence"], 0.95);
+
+    let statement = body["statement"].as_str().unwrap();
+    assert!(statement.contains("95% confidence"), "{statement}");
+    assert!(
+        statement.contains("tighten this group's threshold"),
+        "the plan must say what to do when the sample fails: {statement}"
+    );
+    assert_eq!(
+        body["documents"].as_array().unwrap().len(),
+        body["sample_size"].as_i64().unwrap() as usize
+    );
+}
+
+/// The whole point, end to end over HTTP: stage, let the reaper delete, find
+/// the document gone from Onyx but present in the trash, and put it back.
+#[tokio::test]
+async fn a_deleted_document_lands_in_the_trash_and_can_be_restored_over_http() {
+    let Some(h) = harness_with(false, |cfg| cfg.prune_grace_days = 0).await else {
+        return skip("a_deleted_document_lands_in_the_trash_and_can_be_restored_over_http");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
+
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let target = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["document_id"] == "https://paused.example/old-stub")
+        .expect("the paused stub is a candidate");
+    let candidate_id = target["id"].as_i64().unwrap();
+
+    let staged = post_json(
+        &h.app,
+        "/api/v1/prune/candidates/stage",
+        json!({ "ids": [candidate_id], "confirm_count": 1 }),
+    )
+    .await;
+    assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
+
+    let report = prune_reaper::run_cycle(&h.state).await.expect("reaper cycle");
+    assert_eq!(report.deleted, 1, "the reaper deletes the due document");
+
+    // Gone from Onyx.
+    assert!(
+        doc_hidden(&h.state, "https://paused.example/old-stub")
+            .await
+            .is_none(),
+        "the document row must be gone"
+    );
+
+    // Present in the trash, with its recovery window.
+    let trash = get(&h.app, "/api/v1/prune/trash").await.json();
+    assert_eq!(trash["total"], 1, "{trash}");
+    let item = &trash["items"][0];
+    assert_eq!(item["document_id"], "https://paused.example/old-stub");
+    assert_eq!(item["hold"], false);
+    assert_eq!(item["reappeared"], false);
+    assert!(item["snapshot_bytes"].as_i64().unwrap() > 0);
+    assert!(
+        item["expires_at"].as_str().is_some(),
+        "the retention deadline is shown, not implied"
+    );
+
+    // The content is readable without restoring first.
+    let encoded = urlencoding_encode("https://paused.example/old-stub");
+    let detail = get(&h.app, &format!("/api/v1/prune/trash/{encoded}")).await;
+    assert_eq!(detail.status, StatusCode::OK, "{}", detail.body);
+    let detail = detail.json();
+    assert_eq!(detail["document"]["semantic_id"], "Old Stub");
+
+    // The delete outcome records that it was trashed, not merely deleted.
+    let audit = get(&h.app, "/api/v1/prune/audit?action=deleted").await.json();
+    assert_eq!(audit["items"][0]["detail"]["trashed"], true, "{audit}");
+
+    // Restore it.
+    let restored = post_json(
+        &h.app,
+        "/api/v1/prune/trash/restore",
+        json!({ "document_ids": ["https://paused.example/old-stub"], "confirm_count": 1 }),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "{}", restored.body);
+    let body = restored.json();
+    assert_eq!(body["changed"], 1);
+    assert_eq!(body["action"], "restored");
+
+    // Back in Onyx, with its original flags.
+    assert_eq!(
+        doc_hidden(&h.state, "https://paused.example/old-stub").await,
+        Some(false),
+        "the document is back, un-hidden as it was before staging"
+    );
+    let trash = get(&h.app, "/api/v1/prune/trash").await.json();
+    assert_eq!(trash["total"], 0, "a restored snapshot leaves the trash");
+}
+
+/// Purging is the one irreversible verb and demands the typed count at any
+/// size; a held snapshot is never swept up by it.
+#[tokio::test]
+async fn purging_demands_a_typed_count_and_respects_holds() {
+    let Some(h) = harness_with(false, |cfg| cfg.prune_grace_days = 0).await else {
+        return skip("purging_demands_a_typed_count_and_respects_holds");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
+
+    // Stage and delete every stub so there is something in the trash.
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let ids: Vec<i64> = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["id"].as_i64().unwrap())
+        .collect();
+    let staged = post_json(
+        &h.app,
+        "/api/v1/prune/candidates/stage",
+        json!({ "ids": ids, "confirm_count": ids.len() }),
+    )
+    .await;
+    assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
+    prune_reaper::run_cycle(&h.state).await.expect("reaper cycle");
+
+    let trash = get(&h.app, "/api/v1/prune/trash").await.json();
+    let total = trash["total"].as_i64().unwrap();
+    assert!(total >= 2, "several documents should be in the trash: {trash}");
+    let first = trash["items"][0]["document_id"].as_str().unwrap().to_string();
+
+    // Without a typed count, purge refuses and says why.
+    let refused = post_json(
+        &h.app,
+        "/api/v1/prune/trash/purge",
+        json!({ "document_ids": [first.clone()], "confirm_count": 1 }),
+    )
+    .await;
+    assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.body);
+    assert!(refused.body.contains("cannot be undone"), "{}", refused.body);
+
+    // Hold it, then a correct typed count still refuses to destroy it.
+    let held = post_json(
+        &h.app,
+        "/api/v1/prune/trash/hold",
+        json!({ "document_ids": [first.clone()], "hold": true }),
+    )
+    .await;
+    assert_eq!(held.status, StatusCode::OK, "{}", held.body);
+
+    let attempt = post_json(
+        &h.app,
+        "/api/v1/prune/trash/purge",
+        json!({ "document_ids": [first.clone()], "confirm_count": 1, "typed_count": 1 }),
+    )
+    .await;
+    assert_eq!(attempt.status, StatusCode::OK, "{}", attempt.body);
+    let body = attempt.json();
+    assert_eq!(body["changed"], 0, "a held snapshot survives: {body}");
+    assert_eq!(body["failed"][0]["code"], "ON_HOLD");
+
+    let trash = get(&h.app, "/api/v1/prune/trash").await.json();
+    assert_eq!(trash["total"], total, "nothing was destroyed");
+}
+
+/// Percent-encode a document id for use in a path segment.
+fn urlencoding_encode(raw: &str) -> String {
+    raw.chars()
+        .map(|c| match c {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '_' | '.' | '~' => c.to_string(),
+            other => {
+                let mut buf = [0u8; 4];
+                other
+                    .encode_utf8(&mut buf)
+                    .bytes()
+                    .map(|b| format!("%{b:02X}"))
+                    .collect()
+            }
+        })
+        .collect()
+}
+
+/// A document that was already hidden before pruning restores to hidden; one
+/// that was visible restores to visible. The snapshot records the document's
+/// own state, not the staging flag pruning set on the way to deleting it.
+#[tokio::test]
+async fn restore_returns_the_hidden_flag_the_document_had_before_pruning() {
+    let Some(h) = harness_with(false, |cfg| cfg.prune_grace_days = 0).await else {
+        return skip("restore_returns_the_hidden_flag_the_document_had_before_pruning");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
+
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let hidden_before = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["document_id"] == "https://paused.example/already-hidden-stub")
+        .expect("the already-hidden stub is a candidate");
+    let visible_before = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["document_id"] == "https://paused.example/old-stub")
+        .expect("the visible stub is a candidate");
+
+    let ids = json!([hidden_before["id"], visible_before["id"]]);
+    let staged = post_json(
+        &h.app,
+        "/api/v1/prune/candidates/stage",
+        json!({ "ids": ids, "confirm_count": 2 }),
+    )
+    .await;
+    assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
+    prune_reaper::run_cycle(&h.state).await.expect("reaper cycle");
+
+    let restored = post_json(
+        &h.app,
+        "/api/v1/prune/trash/restore",
+        json!({
+            "document_ids": [
+                "https://paused.example/already-hidden-stub",
+                "https://paused.example/old-stub"
+            ],
+            "confirm_count": 2
+        }),
+    )
+    .await;
+    assert_eq!(restored.status, StatusCode::OK, "{}", restored.body);
+
+    assert_eq!(
+        doc_hidden(&h.state, "https://paused.example/already-hidden-stub").await,
+        Some(true),
+        "a document hidden before pruning comes back hidden"
+    );
+    assert_eq!(
+        doc_hidden(&h.state, "https://paused.example/old-stub").await,
+        Some(false),
+        "a visible document comes back visible, not stuck behind the staging flag"
+    );
 }
