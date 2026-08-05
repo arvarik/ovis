@@ -226,6 +226,36 @@ async fn run_scan(state: &AppState, scan: PruneScanItem) {
                 .await;
             tracing::info!(scan_id = scan.id, "prune scan stopped at a cancellation checkpoint");
         }
+        Err(err) if is_config_too_new(&err) => {
+            // Another, newer instance queued this scan with configuration this
+            // build does not understand. Retrying will never help — but a
+            // newer instance polling the same database *will* succeed, so the
+            // scan is left exactly as it is, without consuming a retry.
+            //
+            // Observed live: a v0.3.0 container and a newer build shared one
+            // database during a rolling upgrade, and the old one burned a
+            // retry every poll. Marking the scan failed there would blame the
+            // scan for a deployment state.
+            db::audit(
+                &state.db,
+                "scan",
+                "scan_deferred_version",
+                None,
+                Some(scan.id),
+                None,
+                Some(json!({
+                    "error": err.log_detail(),
+                    "reason": "config_snapshot_from_a_newer_build",
+                })),
+            )
+            .await;
+            tracing::warn!(
+                scan_id = scan.id,
+                error = %err.log_detail(),
+                "this build cannot read the scan's configuration; leaving it for a newer \
+                 instance rather than failing it"
+            );
+        }
         Err(err) => {
             let detail = err.log_detail();
             // Stats and checkpoint were persisted page by page; never wipe
@@ -294,6 +324,19 @@ async fn run_scan(state: &AppState, scan: PruneScanItem) {
             tracing::error!(scan_id = scan.id, error = %detail, "prune scan failed");
         }
     }
+}
+
+/// Whether a scan failed because its stored configuration was written by a
+/// build that knows fields this one does not.
+///
+/// The snapshot is deserialized with `deny_unknown_fields`, deliberately: a
+/// scan must run under exactly the configuration it was queued with, and
+/// silently dropping a setting it does not understand would produce a scan
+/// that quietly did less than it was asked to. The right response is to leave
+/// the work for a build that can do it.
+fn is_config_too_new(err: &crate::error::AppError) -> bool {
+    matches!(err, crate::error::AppError::BadRequest(detail)
+        if detail.contains("scan config snapshot") && detail.contains("unknown field"))
 }
 
 /// The scan's configuration comes from its own snapshot — the config it was
@@ -477,6 +520,15 @@ async fn execute(
             let mut page_profiles: Vec<DocProfile> = Vec::with_capacity(page.len());
             let mut page_hits: Vec<DetectorHit> = Vec::new();
 
+            // One `_msearch` for the whole page instead of one query per
+            // document: measured 137 docs/s per-document against gamma, which
+            // is 3.5 hours for the full corpus.
+            let page_content = if ctx.wants_content() {
+                fetch_page_content(&ctx, &page, &mut stats).await?
+            } else {
+                HashMap::new()
+            };
+
             for doc in &page {
                 let mut reasons: Vec<PruneReason> = Vec::new();
                 let mut profile = base_profile(doc, &ctx.config_hash);
@@ -529,7 +581,9 @@ async fn execute(
                 // near-duplicate signature. 0-chunk documents have nothing to
                 // fetch (the stub detector owns them).
                 if ctx.wants_content() && doc.chunk_count != Some(0) {
-                    match content_pass(&ctx, doc, &mut stats, &mut profile).await {
+                    match content_pass(&ctx, doc, page_content.get(&doc.id), &mut stats, &mut profile)
+                        .await
+                    {
                         Ok(mut content_reasons) => {
                             consecutive_content_errors = 0;
                             reasons.append(&mut content_reasons);
@@ -540,7 +594,7 @@ async fn execute(
                             tracing::warn!(
                                 document_id = %doc.id,
                                 error = %err.log_detail(),
-                                "content fetch failed during scan"
+                                "content processing failed during scan"
                             );
                             if consecutive_content_errors >= MAX_CONSECUTIVE_CONTENT_ERRORS {
                                 return Err(crate::error::AppError::UpstreamSearch(format!(
@@ -948,10 +1002,63 @@ fn url_signals(
     })
 }
 
-/// Fetch a document's chunk text once and feed every content detector.
+/// A document's fetched text, plus whether the chunk cap clipped it.
+struct PageText {
+    full_text: String,
+    texts: Vec<String>,
+    clipped: bool,
+}
+
+/// Fetch chunk text for a whole page in one request.
+///
+/// Documents with zero chunks are skipped — there is nothing to fetch, and the
+/// stub detector owns them.
+async fn fetch_page_content(
+    ctx: &ScanCtx<'_>,
+    page: &[ScanDocRow],
+    stats: &mut ScanStats,
+) -> Result<HashMap<String, PageText>, crate::error::AppError> {
+    let ids: Vec<String> = page
+        .iter()
+        .filter(|d| d.chunk_count != Some(0))
+        .map(|d| d.id.clone())
+        .collect();
+    if ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let runtime = ctx.state.runtime();
+    let results = ctx
+        .state
+        .os
+        .document_chunks_batch(&runtime.index_name, &ids, CONTENT_CHUNK_CAP, true)
+        .await?;
+    stats.content_docs_fetched += results.len() as i64;
+
+    let mut out = HashMap::with_capacity(results.len());
+    for (id, (chunks, total_chunks)) in ids.into_iter().zip(results) {
+        let texts: Vec<String> = chunks.into_iter().filter_map(|c| c.content).collect();
+        if texts.is_empty() {
+            continue;
+        }
+        let clipped = total_chunks > texts.len() as i64;
+        out.insert(
+            id,
+            PageText {
+                full_text: texts.join("\n\n"),
+                texts,
+                clipped,
+            },
+        );
+    }
+    Ok(out)
+}
+
+/// Feed every content detector from text the page fetch already retrieved.
 async fn content_pass(
     ctx: &ScanCtx<'_>,
     doc: &ScanDocRow,
+    content: Option<&PageText>,
     stats: &mut ScanStats,
     profile: &mut DocProfile,
 ) -> Result<Vec<PruneReason>, crate::error::AppError> {
@@ -1000,23 +1107,14 @@ async fn content_pass(
         return Ok(reasons);
     }
 
-    let runtime = ctx.state.runtime();
-    let (chunks, total_chunks, _) = ctx
-        .state
-        .os
-        .document_chunks(&runtime.index_name, &doc.id, None, CONTENT_CHUNK_CAP, true)
-        .await?;
-    stats.content_docs_fetched += 1;
-
-    let texts: Vec<&str> = chunks
-        .iter()
-        .filter_map(|c| c.content.as_deref())
-        .collect();
-    if texts.is_empty() {
+    // The page fetch already retrieved this; a document missing from it simply
+    // had no extractable text.
+    let Some(content) = content else {
         return Ok(reasons);
-    }
-    let full_text = texts.join("\n\n");
-    let clipped = total_chunks > texts.len() as i64;
+    };
+    let texts: Vec<&str> = content.texts.iter().map(String::as_str).collect();
+    let full_text = &content.full_text;
+    let clipped = content.clipped;
 
     if language_wanted {
         let sample: Vec<&str> = texts.iter().take(LANGUAGE_CHUNKS).copied().collect();
@@ -1061,7 +1159,7 @@ async fn content_pass(
     }
 
     if quality_wanted {
-        let metrics = quality::measure(&full_text);
+        let metrics = quality::measure(full_text);
         let failures = quality::evaluate(&metrics, &ctx.config.quality);
         stats.quality_measured += 1;
         profile.word_count = Some(metrics.word_count as i32);
@@ -1102,7 +1200,7 @@ async fn content_pass(
     }
 
     if thin_words_wanted && !clipped {
-        let words = content::word_count(&full_text);
+        let words = content::word_count(full_text);
         if words > 0 && words < ctx.config.thin.min_words {
             stats.thin_content_hits += 1;
             reasons.push(PruneReason {
@@ -1124,7 +1222,7 @@ async fn content_pass(
 
     if need_signature {
         if let Some(engine) = &ctx.engine {
-            let sig = engine.signature_for_text(&full_text);
+            let sig = engine.signature_for_text(full_text);
             let bands: Vec<i64> = engine
                 .band_hashes(&sig)
                 .into_iter()
@@ -1614,5 +1712,36 @@ mod tests {
         assert_eq!(fingerprint_of(&d), "stored-hash");
         d.content_hash = None;
         assert!(fingerprint_of(&d).starts_with("cc"));
+    }
+}
+
+#[cfg(test)]
+mod version_skew_tests {
+    use super::*;
+    use crate::error::AppError;
+
+    /// A scan queued by a newer build must not be marked failed by an older
+    /// one. Both instances poll the same table during a rolling upgrade, and
+    /// the old build burning the retry budget would blame the scan for a
+    /// deployment state. Observed live against gamma.
+    #[test]
+    fn a_config_snapshot_from_a_newer_build_is_recognised_and_not_a_normal_failure() {
+        let too_new = AppError::BadRequest(
+            "scan config snapshot: unknown field `quality`, expected one of `version`, `dedup`"
+                .into(),
+        );
+        assert!(is_config_too_new(&too_new));
+
+        // Ordinary failures must still count toward the retry budget.
+        for ordinary in [
+            AppError::BadRequest("scan config snapshot: invalid type: string".into()),
+            AppError::UpstreamSearch("connection reset by peer".into()),
+            AppError::Database("deadlock detected".into()),
+        ] {
+            assert!(
+                !is_config_too_new(&ordinary),
+                "{ordinary:?} is a real failure, not version skew"
+            );
+        }
     }
 }

@@ -314,6 +314,82 @@ impl OsClient {
         Ok(deleted)
     }
 
+    /// Chunk text for many documents in **one** round trip.
+    ///
+    /// The scan's content pass is latency-bound, not throughput-bound: one
+    /// query per document against a LAN OpenSearch measured 137 documents/s,
+    /// which is three and a half hours for a 1.7 M-document corpus. `_msearch`
+    /// sends the same per-document queries in a single request, so the cost
+    /// becomes one round trip per page instead of one per document.
+    ///
+    /// Deliberately *not* a single `terms` query: per-document result caps and
+    /// `chunk_index` ordering are what keep a 5,000-chunk document from
+    /// crowding out everything else on the page, and a shared query cannot
+    /// express them.
+    ///
+    /// Returns, per input id in order, the chunks and the true total.
+    pub async fn document_chunks_batch(
+        &self,
+        index: &str,
+        document_ids: &[String],
+        size: i64,
+        include_content: bool,
+    ) -> CoreResult<Vec<(Vec<ChunkItem>, i64)>> {
+        if document_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let mut out = Vec::with_capacity(document_ids.len());
+        // Bounded so one request never carries an unreasonable number of
+        // sub-queries; OpenSearch's default `max_concurrent_searches` applies
+        // per request, not per sub-query.
+        for batch in document_ids.chunks(200) {
+            let mut ndjson = String::new();
+            for document_id in batch {
+                ndjson.push_str("{}\n");
+                let body = query::chunks_body(document_id, None, size, include_content);
+                ndjson.push_str(&body.to_string());
+                ndjson.push('\n');
+            }
+            let url = format!("{}/{}/_msearch", self.base_url, encode_index(index));
+            let response = self
+                .send(
+                    self.client
+                        .post(&url)
+                        .header("Content-Type", "application/x-ndjson")
+                        .body(ndjson),
+                    "batch fetch document chunks",
+                )
+                .await?;
+
+            let responses = response["responses"].as_array().cloned().unwrap_or_default();
+            if responses.len() != batch.len() {
+                return Err(CoreError::search(format!(
+                    "batch fetch document chunks: asked for {} documents, got {} responses",
+                    batch.len(),
+                    responses.len()
+                )));
+            }
+            for sub in responses {
+                // A per-sub-query error must not be read as "no chunks" —
+                // that would silently thin the candidate set, which is exactly
+                // what the consecutive-error guard exists to prevent.
+                if let Some(error) = sub.get("error") {
+                    return Err(CoreError::search(format!(
+                        "batch fetch document chunks: {}",
+                        truncate(&error.to_string(), 300)
+                    )));
+                }
+                let total = sub["hits"]["total"]["value"].as_i64().unwrap_or(0);
+                let items: Vec<ChunkItem> = sub["hits"]["hits"]
+                    .as_array()
+                    .map(|hits| hits.iter().map(parse_chunk).collect())
+                    .unwrap_or_default();
+                out.push((items, total));
+            }
+        }
+        Ok(out)
+    }
+
     /// Every chunk of one document as its verbatim `_id` and `_source`,
     /// **including** the embedding vectors that [`Self::document_chunks`]
     /// deliberately excludes.

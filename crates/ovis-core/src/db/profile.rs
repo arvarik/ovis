@@ -711,6 +711,14 @@ fn signal_predicates(policy: &Policy) -> Vec<SignalSql> {
 }
 
 /// `OR` of every predicate granting at least `band`.
+///
+/// Wrapped in `COALESCE(…, FALSE)` because most profile columns are nullable
+/// and SQL comparison against NULL yields NULL, not FALSE. Without it,
+/// `max_jaccard >= 0.9` on an unmeasured document makes the whole OR NULL, and
+/// then `NOT (auto)` is NULL too — so the review count silently drops every
+/// document that has not been measured by *every* signal in the policy. That
+/// reads as "this policy would do nothing" rather than as a missing
+/// measurement, which is the most misleading answer the simulation could give.
 fn band_predicate(policy: &Policy, band: Band) -> String {
     let parts: Vec<String> = signal_predicates(policy)
         .into_iter()
@@ -725,7 +733,7 @@ fn band_predicate(policy: &Policy, band: Band) -> String {
     if parts.is_empty() {
         "FALSE".to_string()
     } else {
-        format!("({})", parts.join(" OR "))
+        format!("COALESCE({}, FALSE)", parts.join(" OR "))
     }
 }
 
@@ -807,7 +815,7 @@ pub async fn simulate(pool: &PgPool, policy: &Policy) -> CoreResult<SimulationRe
     let mut by_signal = Vec::new();
     for signal in signal_predicates(policy) {
         let count: i64 = sqlx::query_scalar(&format!(
-            "SELECT count(*) FROM ovis.doc_profile p WHERE {exempt} AND {}",
+            "SELECT count(*) FROM ovis.doc_profile p WHERE {exempt} AND COALESCE({}, FALSE)",
             signal.sql
         ))
         .fetch_one(pool)
@@ -916,7 +924,7 @@ pub async fn signals_for_document(
     let mut hits = Vec::new();
     for signal in signal_predicates(policy) {
         let matched: Option<bool> = sqlx::query_scalar(&format!(
-            "SELECT {} FROM ovis.doc_profile p WHERE p.document_id = $1",
+            "SELECT COALESCE({}, FALSE) FROM ovis.doc_profile p WHERE p.document_id = $1",
             signal.sql
         ))
         .bind(document_id)
@@ -1201,11 +1209,40 @@ mod tests {
         let policy = Policy::standard();
         let auto = band_predicate(&policy, Band::Auto);
         let review = band_predicate(&policy, Band::Review);
-        for clause in auto.trim_matches(['(', ')']).split(" OR ") {
+        let clauses = auto
+            .trim_start_matches("COALESCE(")
+            .trim_end_matches(", FALSE)");
+        for clause in clauses.split(" OR ") {
             assert!(
                 review.contains(clause.trim()),
                 "review predicate is missing the auto clause {clause}"
             );
+        }
+    }
+
+    /// Every band predicate must be NULL-safe.
+    ///
+    /// Profile columns are nullable by design ("not measured" is not "measured
+    /// zero"), and `max_jaccard >= 0.9` against NULL is NULL rather than
+    /// FALSE. An un-coalesced predicate therefore makes `NOT (auto)` NULL and
+    /// silently drops every document the policy has not measured with *every*
+    /// signal — which the simulation reports as "this policy would do
+    /// nothing". Found on live data, where a quality-only scan simulated to
+    /// zero while the per-signal breakdown showed 31 hits.
+    #[test]
+    fn band_predicates_treat_unmeasured_columns_as_no_match_not_as_unknown() {
+        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+            for band in [Band::Auto, Band::Review] {
+                let sql = band_predicate(&policy, band);
+                assert!(
+                    sql == "FALSE" || sql.starts_with("COALESCE("),
+                    "band predicate must be NULL-safe, got: {sql}"
+                );
+                assert!(
+                    sql == "FALSE" || sql.ends_with(", FALSE)"),
+                    "band predicate must default to FALSE, got: {sql}"
+                );
+            }
         }
     }
 

@@ -4,19 +4,31 @@ Removing documents that should not be in the corpus — duplicates, stubs,
 foreign-language pages, junk sections — safely, reversibly, and without ever
 disrupting Onyx.
 
-Deletion is the most dangerous operation in the system: irreversible, fanned
-out across Postgres and the search index, and at pruning scale a mistake is
-thousands of documents. So the center of gravity here is the **lifecycle**,
-not the detection: nothing is ever deleted by a button or a command. Every
-document passes through a reversible waiting room first, and only a
-background task (the reaper) ever runs the cascade.
+Deletion is the most dangerous operation in the system: fanned out across
+Postgres and the search index, and at pruning scale a mistake is thousands of
+documents. So the center of gravity here is the **lifecycle**, not the
+detection: nothing is ever deleted by a button or a command. Every document
+passes through a reversible waiting room, and what the reaper deletes goes to
+the trash, where it stays restorable.
 
 ## The lifecycle
 
 ```
-scan → candidate → stage → staged (hidden, grace countdown) → reaper deletes
-                 ↘ dismiss                ↘ restore (exact)
+scan → candidate → stage → staged (hidden, grace countdown)
+                 ↘ dismiss           ↘ restore (exact)
+                                     ↓
+                        reaper: snapshot + cascade
+                                     ↓
+              TRASH (gone from Onyx, restorable) → purged after retention
+                                     ↖ restore (full re-insert)
 ```
+
+Two recovery windows, not one. A staged document is intact and merely hidden,
+so restoring it is a flag flip. A trashed document is genuinely gone from Onyx
+— its rows are deleted and its chunks removed from the index — but OVIS holds a
+complete snapshot, so restoring it re-inserts everything including the
+embedding vectors. The combined window is `OVIS_PRUNE_GRACE_DAYS +
+OVIS_TRASH_RETENTION_DAYS` (7 + 30 by default).
 
 - A **scan** is a preview. It examines documents and produces *candidates*
   with per-document reasons, confidence and evidence. It never mutates a
@@ -53,6 +65,38 @@ config (`ovis prune config export`), and every default is conservative.
 | `language` | pages outside `language.allowed` | reads chunk text | ships **disabled** — multilingual corpora are legitimate. Per-connector opt-outs supported |
 | `url_rule` / `tag_rule` | URL or tag patterns you author | cheap | rules start disabled; preview them against live data first |
 | `stale` | old pages on still-active connectors | cheap | policy, not junk; ships disabled |
+| `quality` | text failing published quality gates | reads chunk text | Gopher/FineWeb/C4 thresholds. Flags only when ≥3 gates fail across ≥2 *families*, and never auto-stages — see the caveat below |
+| `url_junk` | image/media/archive URLs indexed as pages | cheap | PDFs are **not** assets here: 88k of them are real content. Also emits `url_variant_of` |
+| `url_variant` | documents sharing a canonical URL | cheap (uses stored profiles) | folds tracking parameters, scheme, `www.`, trailing slashes, index filenames. Catches copies whose content hashes differ |
+
+### What the quality gates can and cannot tell you
+
+The gates are the published Gopher (arXiv 2112.11446), FineWeb (arXiv
+2406.17557) and C4 (arXiv 1910.10683) heuristics, reproduced at their
+published thresholds because this corpus is a web crawl — the population those
+numbers were tuned on.
+
+They identify text that is *structurally unusual*, which overlaps with, but is
+not the same as, text that is worthless. Measured on the reference deployment:
+API reference pages, syntax diagrams and directory-style documentation trip
+several gates at once because code blocks and tables genuinely have the text
+shape of junk. On one documentation connector 122 of 955 documents were
+flagged, and most were legitimate syntax-reference pages.
+
+Three things follow, all of them enforced rather than advisory:
+
+- **Quality never auto-stages.** No shipped preset gives it an auto band, and a
+  test asserts that.
+- **Confidence is capped below certainty** (0.85), and grows only with the
+  number of failures.
+- **Failures must span gate families.** Line-shape gates
+  (`unterminated_lines`, `short_lines`, `newline_ratio`) fire together on one
+  underlying property, so three of them count as one observation. Requiring
+  two families took the flag rate on a random corpus sample from 27% to 14%
+  and dropped exactly the documents worth keeping.
+
+`quality.exempt_connectors` is the escape hatch for a source that is
+legitimately code or tables end to end.
 
 A re-scan updates existing open candidates instead of duplicating them, and
 closes candidates whose reasons no longer apply
@@ -64,10 +108,36 @@ resume from their cursor (verified with a `kill -9` mid-scan on the reference
 deployment), and they can be cancelled between pages. One scan runs at a
 time.
 
+## Measurements, not verdicts
+
+A scan writes an `ovis.doc_profile` row for **every** document it examines,
+flagged or not: word counts, which quality gates failed, canonical URL, URL
+class, duplicate-group membership, strongest measured similarity. Verified
+duplicate pairs go to `ovis.dup_pair` with their similarity, including pairs
+below the acting threshold.
+
+That is what makes thresholds a review-time decision. `POST /prune/simulate`
+evaluates a policy against the stored profiles and reports what it *would*
+flag — as a real aggregate query, not an estimate — without creating anything.
+Lowering a threshold and re-simulating costs a query; under v1 it cost a
+re-scan of 1.7 M documents.
+
+Simulation also reports what it cannot see. If no document has an embedding
+similarity yet, a policy with semantic thresholds says so rather than
+reporting a confident zero.
+
 ## The reaper
 
 The reaper ticks every `OVIS_PRUNE_REAPER_INTERVAL_SECS` (300) and is the
 **only** code path that hard-deletes pruned documents:
+
+- **Snapshots before it deletes.** The snapshot and the Postgres cascade share
+  one transaction, so the only two outcomes are "document present, no
+  snapshot" and "document gone, snapshot exists". A document whose chunks
+  cannot be read is not deleted at all.
+- **Refuses to run without a trash.** If `ovis.trash_document` could not be
+  created the reaper halts with `trash_unavailable` rather than falling back to
+  irreversible deletion.
 
 - Deletes only staged documents whose grace has ended, oldest deadline
   first, in batches of `OVIS_PRUNE_REAPER_BATCH_SIZE` (100) with a
@@ -90,6 +160,43 @@ The reaper ticks every `OVIS_PRUNE_REAPER_INTERVAL_SECS` (300) and is the
   state flip (`staged → deleting`), and on restart leftover `deleting` rows
   are re-verified — an intact document goes back to staged; a half-deleted
   one is closed honestly with index cleanup queued.
+
+## The trash
+
+Everything the reaper deletes lands in `ovis.trash_document` first:
+
+| Captured | Why |
+|---|---|
+| the full `public.document` row | restore has to rebuild it exactly |
+| tags and connector attribution | otherwise a restored document loses its provenance |
+| every chunk's verbatim OpenSearch `_source` | the content itself |
+| embedding vectors, packed as f16 | a restored document is semantically searchable **immediately**, with no re-index |
+
+About 15 kB per document with vectors, 5 kB without
+(`OVIS_TRASH_KEEP_VECTORS=false`). Onyx cannot see any of it: the document rows
+are genuinely deleted and the chunks genuinely removed, so search, connectors
+and the Onyx admin UI have nothing left to find. The bytes live in the `ovis`
+schema, which Onyx never reads.
+
+- **Restore** re-inserts the Postgres rows and bulk-indexes the chunks under
+  their original ids. The `hidden` flag comes back as the document's own
+  `prev_hidden` — the value it carried *before* pruning touched it — because
+  staging's flag is part of the pruning process, not part of the document.
+  Tags whose `tag` row has since been deleted, and attributions whose
+  connector is gone, are skipped and **counted** in the response rather than
+  silently dropped.
+- **Reappeared documents**: if the crawler brought the id back, restore is
+  refused unless `overwrite` is set. The Trash tab badges these.
+- **Hold** pins a snapshot indefinitely, exempt from automatic purge.
+- **Purge** is the only genuinely irreversible operation in the system. It
+  requires the typed count at *every* size, skips held snapshots, and there is
+  deliberately no "empty trash" verb.
+
+Verified end to end against the live deployment: a document was staged,
+deleted by the reaper, confirmed absent from Postgres and from all 4 of its
+index chunks, then restored — with its vectors intact (unit norm preserved
+through the f16 round trip) and returned as the top kNN hit for its own
+embedding.
 
 ## Recrawl risk, handled honestly
 
@@ -140,6 +247,9 @@ Server settings (environment, all optional):
 | `OVIS_PRUNE_MAX_DOCS_PER_HOUR` | 2000 | hard hourly deletion ceiling |
 | `OVIS_PRUNE_BIG_BATCH` | 500 | typed-count threshold on both surfaces |
 | `OVIS_PRUNE_SCAN_PAGE_SIZE` | 1000 | scan keyset page |
+| `OVIS_TRASH_RETENTION_DAYS` | 30 | how long a deleted document stays restorable (1–365; zero is refused — a trash that empties at once is not a trash) |
+| `OVIS_TRASH_KEEP_VECTORS` | true | capture embeddings, so restore needs no re-index |
+| `OVIS_TRASH_PURGE_BATCH_SIZE` | 200 | expired snapshots purged per reaper cycle |
 
 Detector configuration is data, not env: it lives in `ovis.prune_rules` and
 round-trips as YAML (`ovis prune config export|import`, or the Rules tab).
@@ -164,6 +274,35 @@ ovis prune delete @1 --remember                                   # bring the de
 ovis prune status                                                 # counts, reaper state, rates
 ovis prune log --since 1d                                         # who did what
 ```
+
+## Performance
+
+Measured against the reference deployment (1.74 M documents, LAN):
+
+| Phase | Rate | Full corpus |
+|---|---|---|
+| SQL-only detectors (`thin`, `url_junk`) | ~1,700 docs/s | ~17 min |
+| With text (`quality`, `near_duplicate`, `language`) | ~380 docs/s | ~76 min |
+
+The text pass batches a whole page of documents into one OpenSearch
+`_msearch` rather than a query per document; like-for-like on the same
+connector that is a 2.8× speedup, and it is what brings a full-corpus text
+scan under the hour-and-a-quarter mark. Candidate writes are batched per page
+for the same reason.
+
+Long documents are slower per row (a 900-document philosophy encyclopedia
+measured ~96 docs/s), because that phase is bound by text volume rather than
+by round trips.
+
+## Upgrading
+
+A scan records the configuration it was queued under, and reads it back
+strictly — a scan must run under exactly the settings it was created with. An
+**older** OVIS instance sharing the database with a newer one therefore cannot
+run a scan queued by the newer one; it logs `scan_deferred_version`, leaves the
+scan untouched, and lets the newer instance pick it up. It does not consume
+the retry budget and does not mark the scan failed. Observed during a live
+rolling upgrade.
 
 ## What pruning never touches
 

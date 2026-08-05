@@ -187,6 +187,48 @@ async fn mock_opensearch(read_only: bool) -> MockServer {
         .mount(&server)
         .await;
 
+    // `_msearch`: the scan's content pass batches a whole page into one
+    // request. Mounted before the `_search` matcher so the more specific path
+    // wins.
+    Mock::given(method("POST"))
+        .and(path_regex(r".*/_msearch.*"))
+        .respond_with(|request: &wiremock::Request| {
+            let body = String::from_utf8_lossy(&request.body).to_string();
+            let mut responses: Vec<Value> = Vec::new();
+            // ndjson: alternating header and query lines.
+            for line in body.lines().filter(|l| l.contains("document_id")) {
+                let query: Value = serde_json::from_str(line).unwrap_or(Value::Null);
+                let doc_id = query["query"]["term"]["document_id"].as_str().unwrap_or("");
+                let chunks = chunk_texts_for(doc_id);
+                let hits: Vec<Value> = chunks
+                    .iter()
+                    .enumerate()
+                    .map(|(i, content)| {
+                        json!({
+                            "_id": format!("{doc_id}__{i}"),
+                            "_source": {
+                                "chunk_index": i,
+                                "document_id": doc_id,
+                                "content": content,
+                                "blurb": "blurb",
+                                "title": "Title",
+                                "semantic_identifier": "Title",
+                                "source_type": "web",
+                                "hidden": false,
+                            }
+                        })
+                    })
+                    .collect();
+                responses.push(json!({
+                    "status": 200,
+                    "hits": { "total": { "value": chunks.len(), "relation": "eq" }, "hits": hits }
+                }));
+            }
+            ResponseTemplate::new(200).set_body_json(json!({ "responses": responses }))
+        })
+        .mount(&server)
+        .await;
+
     let blocks = if read_only {
         json!({ "read_only_allow_delete": "true" })
     } else {
