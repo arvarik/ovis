@@ -140,7 +140,7 @@ function ClusterCard({
   return (
     <Card className="space-y-4 p-4">
       {keeper ? (
-        <div className="rounded-md border border-mint/30 bg-mint/10 p-3">
+        <div className="rounded-md border border-mint/40 bg-surface-2 p-3">
           <div className="flex items-center gap-2">
             <Badge tone="mint">keeping</Badge>
             <span className="text-caption text-ink-mute">{cluster.keeper_reason}</span>
@@ -201,7 +201,7 @@ function MemberMeta({
     <div className="mt-1 flex flex-wrap gap-x-3 text-caption text-ink-mute">
       <span>{member.semantic_id ?? '—'}</span>
       <span>
-        {member.chunk_count ?? '—'} chunks
+        {member.chunk_count ?? '—'} {member.chunk_count === 1 ? 'chunk' : 'chunks'}
         {chunkDelta !== null && chunkDelta !== 0
           ? ` (${chunkDelta > 0 ? '+' : ''}${chunkDelta} vs keeper)`
           : ''}

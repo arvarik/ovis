@@ -29,7 +29,6 @@ import { EmptyState } from '@/components/primitives/EmptyState';
 import { Input } from '@/components/primitives/Input';
 import { Skeleton } from '@/components/primitives/Skeleton';
 import { count as formatCount } from '@/lib/format';
-import { chunkLabel } from './pruneShared';
 
 type Tier = 'conservative' | 'standard' | 'aggressive';
 
@@ -134,8 +133,12 @@ export function TriageTab({ onOpenBundle }: { onOpenBundle: (bundle: PruneBundle
 }
 
 function CorpusSummary({ data }: { data: PruneOverviewResponse }) {
+  const measuredShare =
+    data.documents_total > 0 ? (data.profiled / data.documents_total) * 100 : 0;
+  // Rounding a real 0.14% to "0%" reads as "nothing measured" when thousands
+  // of documents have been.
   const measuredPct =
-    data.documents_total > 0 ? Math.round((data.profiled / data.documents_total) * 100) : 0;
+    measuredShare > 0 && measuredShare < 1 ? '<1' : Math.round(measuredShare).toString();
   return (
     <Card className="p-4">
       <div className="grid gap-4 sm:grid-cols-4">
@@ -192,7 +195,7 @@ function BundleCard({ bundle, onOpen }: { bundle: PruneBundle; onOpen: () => voi
             {formatCount(bundle.documents)}
           </div>
           <div className="text-caption text-ink-mute">
-            {chunkLabel(bundle.chunks)} chunks
+            {formatCount(bundle.chunks)} chunks
             {bundle.recrawl_risk > 0 ? ` · ${formatCount(bundle.recrawl_risk)} may return` : ''}
           </div>
         </div>
@@ -319,33 +322,44 @@ function PolicyDial({
             </div>
           ) : null}
 
-          <div className="flex flex-wrap items-end gap-2 border-t border-line pt-3">
-            <label className="text-label text-ink-mute">
-              Type {formatCount(autoCount)} to create review rows for the bulk band
-              <Input
-                value={typed}
-                onChange={(e) => setTyped(e.target.value)}
-                inputMode="numeric"
-                className="mt-1 w-32"
-                aria-label={`Type ${autoCount} to confirm`}
-              />
-            </label>
-            <Button
-              disabled={!canCommit || commit.isPending}
-              onClick={() => {
-                commit.mutate(
-                  { tier, band: 'auto', confirm_count: autoCount },
-                  { onSuccess: () => setTyped('') },
-                );
-              }}
-            >
-              {commit.isPending ? 'Creating…' : `Create ${formatCount(autoCount)} candidates`}
-            </Button>
-            <p className="text-caption text-ink-mute">
-              Creates review rows only. Nothing is hidden or deleted until you stage it, and
-              deletion still waits out the grace period.
+          {/* Offering "Create 0 candidates" reads as a broken button rather
+              than as an empty result, so the empty case says what happened. */}
+          {autoCount > 0 ? (
+            <div className="flex flex-wrap items-end gap-2 border-t border-line pt-3">
+              <label className="text-label text-ink-mute">
+                Type {formatCount(autoCount)} to create review rows for the bulk band
+                <Input
+                  value={typed}
+                  onChange={(e) => setTyped(e.target.value)}
+                  inputMode="numeric"
+                  className="mt-1 w-32"
+                  aria-label={`Type ${autoCount} to confirm`}
+                />
+              </label>
+              <Button
+                disabled={!canCommit || commit.isPending}
+                onClick={() => {
+                  commit.mutate(
+                    { tier, band: 'auto', confirm_count: autoCount },
+                    { onSuccess: () => setTyped('') },
+                  );
+                }}
+              >
+                {commit.isPending ? 'Creating…' : `Create ${formatCount(autoCount)} candidates`}
+              </Button>
+              <p className="text-caption text-ink-mute">
+                Creates review rows only. Nothing is hidden or deleted until you stage it, and
+                deletion still waits out the grace period.
+              </p>
+            </div>
+          ) : (
+            <p className="border-t border-line pt-3 text-caption text-ink-mute">
+              This level would not stage anything new
+              {result.review > 0
+                ? ` — the ${formatCount(result.review)} in the review band need a human decision.`
+                : '. Everything it can see is either already under review or left alone.'}
             </p>
-          </div>
+          )}
         </Card>
       ) : null}
     </section>
@@ -379,7 +393,7 @@ function ConnectorTable({
                   {formatCount(row.documents)}
                 </td>
                 <td className="p-2 text-right tabular-nums text-ink-mute">
-                  {chunkLabel(row.chunks)}
+                  {formatCount(row.chunks)}
                 </td>
                 <td className="p-2 text-right tabular-nums text-ink-mute">
                   {Math.round(row.mean_confidence * 100)}%

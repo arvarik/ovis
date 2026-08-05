@@ -375,6 +375,24 @@ pub async fn simulate(
     })
 }
 
+/// Group digits for display. These caveats are prose shown to a person, and
+/// "2403 of 1738163" is measurably harder to read than "2,403 of 1,738,163".
+fn thousands(n: i64) -> String {
+    let digits = n.abs().to_string();
+    let mut out = String::with_capacity(digits.len() + digits.len() / 3);
+    for (i, ch) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i) % 3 == 0 {
+            out.push(',');
+        }
+        out.push(ch);
+    }
+    if n < 0 {
+        format!("-{out}")
+    } else {
+        out
+    }
+}
+
 /// Say what the numbers do *not* cover. A simulation that silently reports
 /// zero semantic duplicates because nothing measured cosine yet is worse than
 /// one that says so.
@@ -390,9 +408,10 @@ async fn caveats_for(
         .unwrap_or(0);
     if result.profiled < documents_total {
         caveats.push(format!(
-            "{} of {documents_total} documents have been measured; the rest are invisible to \
-             this simulation until a scan covers them.",
-            result.profiled
+            "{} of {} documents have been measured; the rest are invisible to this simulation \
+             until a scan covers them.",
+            thousands(result.profiled),
+            thousands(documents_total)
         ));
     }
     let measured_cosine: i64 =
@@ -890,5 +909,21 @@ mod tests {
             policy_hash(&Policy::aggressive())
         );
         assert_eq!(policy_hash(&Policy::standard()).len(), 32);
+    }
+}
+
+#[cfg(test)]
+mod formatting_tests {
+    use super::thousands;
+
+    #[test]
+    fn digits_are_grouped_for_reading() {
+        assert_eq!(thousands(0), "0");
+        assert_eq!(thousands(42), "42");
+        assert_eq!(thousands(999), "999");
+        assert_eq!(thousands(1_000), "1,000");
+        assert_eq!(thousands(2_403), "2,403");
+        assert_eq!(thousands(1_738_163), "1,738,163");
+        assert_eq!(thousands(-1_234), "-1,234");
     }
 }

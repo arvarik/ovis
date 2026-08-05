@@ -222,7 +222,8 @@ function TrashRow({
           {item.semantic_id ?? item.document_id}
         </button>
         <div className="text-caption text-ink-mute">
-          {item.connector_name ?? '—'} · {formatCount(item.chunk_count)} chunks
+          {item.connector_name ?? '—'} · {formatCount(item.chunk_count)}{' '}
+          {item.chunk_count === 1 ? 'chunk' : 'chunks'}
           {item.vectors_included ? ' · vectors kept' : ' · no vectors'}
         </div>
         {item.reappeared ? (
