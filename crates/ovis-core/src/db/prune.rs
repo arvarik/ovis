@@ -704,6 +704,130 @@ pub async fn upsert_candidate(
     }
 }
 
+/// Record a page of detector hits with a bounded number of round trips.
+///
+/// [`upsert_candidate`] costs three queries per document — an exclusion
+/// lookup, an open-row lookup, and the write. Across a 1.7 M-document corpus
+/// that latency *is* the scan: the v1 exact phase spent ~35 minutes on 21.5 k
+/// groups almost entirely waiting on it. Here the two lookups are one query
+/// each per page and the inserts are a single multi-row statement, so a page
+/// of 1000 costs a handful of round trips instead of 3000.
+///
+/// Semantics are identical to the per-document path: excluded documents are
+/// skipped, rows already past `candidate` are left alone, and reasons merge by
+/// `(detector, code)` with confidence as the maximum.
+pub async fn upsert_candidates(
+    pool: &PgPool,
+    scan_id: Option<i64>,
+    hits: &[DetectorHit],
+) -> CoreResult<Vec<UpsertOutcome>> {
+    if hits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let ids: Vec<String> = hits.iter().map(|h| h.document_id.clone()).collect();
+
+    let excluded: Vec<String> = sqlx::query_scalar(
+        "SELECT document_id FROM ovis.prune_exclusions WHERE document_id = ANY($1)",
+    )
+    .bind(&ids)
+    .fetch_all(pool)
+    .await?;
+    let excluded: std::collections::HashSet<String> = excluded.into_iter().collect();
+
+    let open_rows: Vec<(i64, String, String, Value)> = sqlx::query_as(
+        "SELECT id, document_id, state, reasons FROM ovis.prune_candidate \
+         WHERE document_id = ANY($1) AND state = ANY($2)",
+    )
+    .bind(&ids)
+    .bind(OPEN_STATES.map(String::from).to_vec())
+    .fetch_all(pool)
+    .await?;
+    let open: std::collections::HashMap<String, (i64, String, Value)> = open_rows
+        .into_iter()
+        .map(|(id, doc, state, reasons)| (doc, (id, state, reasons)))
+        .collect();
+
+    let mut outcomes = Vec::with_capacity(hits.len());
+    let mut to_insert: Vec<&DetectorHit> = Vec::new();
+    let mut to_update: Vec<(i64, Vec<PruneReason>, &DetectorHit)> = Vec::new();
+
+    for hit in hits {
+        if excluded.contains(&hit.document_id) {
+            outcomes.push(UpsertOutcome::Excluded);
+            continue;
+        }
+        match open.get(&hit.document_id) {
+            None => {
+                outcomes.push(UpsertOutcome::Inserted);
+                to_insert.push(hit);
+            }
+            Some((id, state, existing)) if state == "candidate" => {
+                let mut reasons: Vec<PruneReason> =
+                    serde_json::from_value(existing.clone()).unwrap_or_default();
+                merge_reasons(&mut reasons, hit.reasons.clone());
+                outcomes.push(UpsertOutcome::Updated);
+                to_update.push((*id, reasons, hit));
+            }
+            Some(_) => outcomes.push(UpsertOutcome::LeftAlone),
+        }
+    }
+
+    if !to_insert.is_empty() {
+        // Chunked so one page never exceeds Postgres' parameter limit
+        // (65535 / 8 columns).
+        for chunk in to_insert.chunks(2000) {
+            let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+                "INSERT INTO ovis.prune_candidate \
+                 (document_id, scan_id, state, reasons, confidence, recrawl_risk, \
+                  connector_id, cc_pair_id, chunk_count) ",
+            );
+            qb.push_values(chunk, |mut row, hit| {
+                let reasons = serde_json::to_value(&hit.reasons).unwrap_or(Value::Null);
+                row.push_bind(hit.document_id.clone())
+                    .push_bind(scan_id)
+                    .push("'candidate'")
+                    .push_bind(reasons)
+                    .push_bind(max_confidence(&hit.reasons))
+                    .push_bind(hit.recrawl_risk)
+                    .push_bind(hit.connector_id)
+                    .push_bind(hit.cc_pair_id)
+                    .push_bind(hit.chunk_count);
+            });
+            // A concurrent writer may have opened a row between the lookup and
+            // here; the partial unique index turns that into a no-op rather
+            // than a failed page.
+            qb.push(" ON CONFLICT DO NOTHING");
+            qb.build().execute(pool).await?;
+        }
+    }
+
+    for (id, reasons, hit) in to_update {
+        let confidence = max_confidence(&reasons);
+        let reasons = serde_json::to_value(&reasons)
+            .map_err(|e| CoreError::Invalid(format!("unserialisable reasons: {e}")))?;
+        sqlx::query(
+            "UPDATE ovis.prune_candidate \
+             SET reasons = $2, confidence = $3, scan_id = COALESCE($4, scan_id), \
+                 recrawl_risk = $5, connector_id = COALESCE($6, connector_id), \
+                 cc_pair_id = COALESCE($7, cc_pair_id), \
+                 chunk_count = COALESCE($8, chunk_count), updated_at = now() \
+             WHERE id = $1",
+        )
+        .bind(id)
+        .bind(reasons)
+        .bind(confidence)
+        .bind(scan_id)
+        .bind(hit.recrawl_risk)
+        .bind(hit.connector_id)
+        .bind(hit.cc_pair_id)
+        .bind(hit.chunk_count)
+        .execute(pool)
+        .await?;
+    }
+
+    Ok(outcomes)
+}
+
 /// Close open `candidate` rows a completed re-scan no longer flags: same
 /// detector, inside the scan's scope, not touched by this scan.
 ///

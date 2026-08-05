@@ -29,7 +29,7 @@ use crate::error::AppError;
 use crate::state::AppState;
 
 /// Detector names accepted by `POST /prune/scans`.
-pub const KNOWN_DETECTORS: [&str; 7] = [
+pub const KNOWN_DETECTORS: [&str; 10] = [
     "exact_duplicate",
     "near_duplicate",
     "language",
@@ -37,12 +37,16 @@ pub const KNOWN_DETECTORS: [&str; 7] = [
     "tag_rule",
     "thin",
     "stale",
+    // v2 detectors.
+    "quality",
+    "url_junk",
+    "url_variant",
 ];
 
 /// The `detector` values that appear on *reasons* (what candidate filtering
 /// matches). Both duplicate detectors emit `duplicate`; the reaper's
 /// re-stage emits `recrawl`.
-pub const REASON_DETECTORS: [&str; 7] = [
+pub const REASON_DETECTORS: [&str; 9] = [
     "duplicate",
     "language",
     "url_rule",
@@ -50,6 +54,8 @@ pub const REASON_DETECTORS: [&str; 7] = [
     "thin",
     "stale",
     "recrawl",
+    "quality",
+    "url_junk",
 ];
 
 pub const CANDIDATE_STATES: [&str; 6] = [

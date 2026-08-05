@@ -159,6 +159,127 @@ pub async fn profile_fingerprints(
     .await?)
 }
 
+/// Document ids sharing each of the given canonical URLs.
+pub async fn documents_for_canonical_urls(
+    pool: &PgPool,
+    keys: &[String],
+) -> CoreResult<Vec<(String, String)>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    Ok(sqlx::query_as(
+        "SELECT canonical_url, document_id FROM ovis.doc_profile \
+         WHERE canonical_url = ANY($1) ORDER BY canonical_url, document_id",
+    )
+    .bind(keys.to_vec())
+    .fetch_all(pool)
+    .await?)
+}
+
+/// Record duplicate-group membership for a batch of documents.
+///
+/// `group` is namespaced by method (`hash:…`, `url:…`) so the two duplicate
+/// detectors — which measure genuinely different things — never overwrite each
+/// other's findings.
+pub async fn set_dup_groups(
+    pool: &PgPool,
+    entries: &[(String, String, i32)],
+) -> CoreResult<u64> {
+    if entries.is_empty() {
+        return Ok(0);
+    }
+    // Last write wins per document, for the same "cannot affect row a second
+    // time" reason as `set_max_similarity`.
+    let mut latest: std::collections::HashMap<&str, (&str, i32)> = std::collections::HashMap::new();
+    for (id, group, size) in entries {
+        latest.insert(id.as_str(), (group.as_str(), *size));
+    }
+    let mut ids: Vec<String> = Vec::with_capacity(latest.len());
+    let mut groups: Vec<String> = Vec::with_capacity(latest.len());
+    let mut sizes: Vec<i32> = Vec::with_capacity(latest.len());
+    for (id, (group, size)) in latest {
+        ids.push(id.to_string());
+        groups.push(group.to_string());
+        sizes.push(size);
+    }
+    Ok(sqlx::query(
+        "INSERT INTO ovis.doc_profile (document_id, dup_group, dup_group_size) \
+         SELECT * FROM unnest($1::text[], $2::text[], $3::int[]) \
+         ON CONFLICT (document_id) DO UPDATE \
+           SET dup_group = excluded.dup_group, dup_group_size = excluded.dup_group_size",
+    )
+    .bind(&ids)
+    .bind(&groups)
+    .bind(&sizes)
+    .execute(pool)
+    .await?
+    .rows_affected())
+}
+
+/// Record each document's strongest similarity and the neighbour that produced
+/// it. `GREATEST` rather than assignment, so a later page that happens to find
+/// a weaker pair cannot lower a document's recorded maximum.
+pub async fn set_max_similarity(
+    pool: &PgPool,
+    method: &str,
+    entries: &[(String, f32, String)],
+) -> CoreResult<u64> {
+    if entries.is_empty() {
+        return Ok(0);
+    }
+    // A document routinely appears in several pairs from one bucket, and
+    // Postgres refuses an `ON CONFLICT DO UPDATE` that would touch the same
+    // row twice in one statement ("cannot affect row a second time"). Collapse
+    // to the strongest pair per document first.
+    let mut best: std::collections::HashMap<&str, (f32, &str)> = std::collections::HashMap::new();
+    for (id, score, other) in entries {
+        let slot = best.entry(id.as_str()).or_insert((*score, other.as_str()));
+        if *score > slot.0 {
+            *slot = (*score, other.as_str());
+        }
+    }
+    let mut ids: Vec<String> = Vec::with_capacity(best.len());
+    let mut scores: Vec<f32> = Vec::with_capacity(best.len());
+    let mut others: Vec<String> = Vec::with_capacity(best.len());
+    for (id, (score, other)) in best {
+        ids.push(id.to_string());
+        scores.push(score);
+        others.push(other.to_string());
+    }
+    let sql = match method {
+        "minhash" => {
+            "INSERT INTO ovis.doc_profile (document_id, max_jaccard, max_jaccard_doc) \
+             SELECT * FROM unnest($1::text[], $2::real[], $3::text[]) \
+             ON CONFLICT (document_id) DO UPDATE SET \
+               max_jaccard = GREATEST(excluded.max_jaccard, ovis.doc_profile.max_jaccard), \
+               max_jaccard_doc = CASE \
+                 WHEN excluded.max_jaccard >= COALESCE(ovis.doc_profile.max_jaccard, -1) \
+                 THEN excluded.max_jaccard_doc ELSE ovis.doc_profile.max_jaccard_doc END"
+        }
+        "cosine" => {
+            "INSERT INTO ovis.doc_profile (document_id, max_cosine, max_cosine_doc) \
+             SELECT * FROM unnest($1::text[], $2::real[], $3::text[]) \
+             ON CONFLICT (document_id) DO UPDATE SET \
+               max_cosine = GREATEST(excluded.max_cosine, ovis.doc_profile.max_cosine), \
+               max_cosine_doc = CASE \
+                 WHEN excluded.max_cosine >= COALESCE(ovis.doc_profile.max_cosine, -1) \
+                 THEN excluded.max_cosine_doc ELSE ovis.doc_profile.max_cosine_doc END"
+        }
+        other => {
+            return Err(crate::error::CoreError::Invalid(format!(
+                "unknown similarity method '{other}'"
+            )))
+        }
+    };
+    Ok(sqlx::query(sql)
+        .bind(&ids)
+        .bind(&scores)
+        .bind(&others)
+        .execute(pool)
+        .await?
+        .rows_affected())
+}
+
 pub async fn profile_count(pool: &PgPool) -> CoreResult<i64> {
     Ok(sqlx::query_scalar("SELECT count(*) FROM ovis.doc_profile")
         .fetch_one(pool)

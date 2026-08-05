@@ -46,6 +46,27 @@ fn chunk_texts_for(doc_id: &str) -> Vec<String> {
         "https://paused.example/de/impressum" => {
             vec![GERMAN_TEXT.to_string(), GERMAN_TEXT.to_string()]
         }
+        // An image indexed as a page: the crawl extracted the filename and
+        // dimensions, nothing more.
+        "https://paused.example/media/diagram.png" => {
+            vec!["diagram.png (1200×800)".to_string()]
+        }
+        // A PDF with genuine prose of its own — proves PDFs are not treated
+        // as assets, without accidentally near-duplicating the guide.
+        "https://paused.example/reports/annual.pdf" => vec![
+            "The annual report summarises procurement volumes, staffing changes and \
+             capital expenditure across each regional office during the reporting year. \
+             Figures are presented alongside the prior period so that variance can be \
+             traced to specific programmes rather than to accounting adjustments made \
+             at consolidation."
+                .to_string(),
+        ],
+        // Navigation chrome: short unpunctuated lines, few stopwords.
+        "https://paused.example/site/nav" => vec![
+            "Home\nAbout\nContact\nProducts\nServices\nBlog\nCareers\nPress\nLegal\nHelp\n\
+             Sitemap\nPrivacy\nTerms\nJobs\nNews"
+                .to_string(),
+        ],
         other => vec![
             format!(
                 "chunk zero of {other} carrying enough distinct filler words that unrelated \
@@ -1532,14 +1553,27 @@ async fn url_rules_flag_matches_and_carry_the_rule_name() {
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
 
     let scan = run_scan(&h, json!({ "kind": "all" }), json!(["url_rule"])).await;
-    assert_eq!(scan["stats"]["url_rule_hits"], 1, "{scan}");
+    // Both tracking-parameter URLs in the fixture match: the utm-tagged
+    // duplicate and the utm-tagged URL variant.
+    assert_eq!(scan["stats"]["url_rule_hits"], 2, "{scan}");
 
     let body = get(&h.app, "/api/v1/prune/candidates?detector=url_rule")
         .await
         .json();
-    assert_eq!(body["total"], 1);
-    let item = &body["items"][0];
-    assert_eq!(item["document_id"], "https://paused.example/dup?utm_source=feed");
+    assert_eq!(body["total"], 2);
+    let flagged: Vec<&str> = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["document_id"].as_str().unwrap())
+        .collect();
+    assert!(flagged.contains(&"https://paused.example/dup?utm_source=feed"), "{flagged:?}");
+    let item = body["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["document_id"] == "https://paused.example/dup?utm_source=feed")
+        .unwrap();
     assert_eq!(item["reasons"][0]["code"], "tracking-params");
     assert_eq!(item["reasons"][0]["confidence"], 0.95);
 }
@@ -1689,11 +1723,17 @@ async fn starter_rules_ship_disabled_and_preview_never_mutates() {
     .await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     let preview = reply.json();
-    assert_eq!(preview["matched"], 1, "{preview}");
+    assert_eq!(preview["matched"], 2, "{preview}");
     assert_eq!(preview["complete"], true);
-    assert_eq!(
-        preview["sample"][0]["document_id"],
-        "https://paused.example/dup?utm_source=feed"
+    let sampled: Vec<&str> = preview["sample"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|s| s["document_id"].as_str().unwrap())
+        .collect();
+    assert!(
+        sampled.contains(&"https://paused.example/dup?utm_source=feed"),
+        "{sampled:?}"
     );
 
     // Preview created no candidates and no audit actions beyond rule CRUD.
@@ -1702,4 +1742,262 @@ async fn starter_rules_ship_disabled_and_preview_never_mutates() {
         .await
         .unwrap();
     assert_eq!(candidates, 0, "a preview never mutates");
+}
+
+// ===========================================================================
+// v2 — measurement-based detection
+// ===========================================================================
+
+/// Asset URLs are junk; PDFs on this corpus are not.
+///
+/// The distinction matters at scale: the reference corpus holds 64k image URLs
+/// whose extracted text is `name.png (W×H)`, and 88k PDFs that are real
+/// content (government report mirrors, scanned technical archives). A detector
+/// that treated "binary" as "junk" would delete the second group.
+#[tokio::test]
+async fn asset_urls_are_flagged_and_pdfs_are_left_alone() {
+    let Some(h) = harness().await else {
+        return skip("asset_urls_are_flagged_and_pdfs_are_left_alone");
+    };
+
+    let scan = run_scan(&h, json!({ "kind": "all" }), json!(["url_junk"])).await;
+    assert_eq!(scan["status"], "done", "{scan}");
+    assert!(scan["stats"]["asset_hits"].as_i64().unwrap() >= 1);
+
+    let candidates = get(&h.app, "/api/v1/prune/candidates?detector=url_junk&limit=100")
+        .await
+        .json();
+    let flagged: Vec<&str> = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["document_id"].as_str().unwrap())
+        .collect();
+
+    assert!(
+        flagged.contains(&"https://paused.example/media/diagram.png"),
+        "the image URL must be flagged: {flagged:?}"
+    );
+    assert!(
+        !flagged.contains(&"https://paused.example/reports/annual.pdf"),
+        "PDFs carry real content on this corpus and must not be flagged: {flagged:?}"
+    );
+
+    // The reason carries what it measured, not just a verdict.
+    let asset = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["document_id"] == "https://paused.example/media/diagram.png")
+        .unwrap();
+    let reason = &asset["reasons"][0];
+    assert_eq!(reason["detector"], "url_junk");
+    assert_eq!(reason["code"], "asset_url");
+    assert_eq!(reason["evidence"]["url_class"], "image");
+}
+
+/// Two URLs that differ only by scheme, `www.`, a trailing slash and a
+/// tracking parameter are one page — even though their content hashes differ,
+/// which is exactly the case `exact_duplicate` cannot see.
+#[tokio::test]
+async fn url_variants_are_grouped_even_when_content_hashes_differ() {
+    let Some(h) = harness().await else {
+        return skip("url_variants_are_grouped_even_when_content_hashes_differ");
+    };
+
+    // The canonical key is computed during the document walk, so the variant
+    // phase needs a walk detector alongside it.
+    let scan = run_scan(&h, json!({ "kind": "all" }), json!(["url_junk", "url_variant"])).await;
+    assert_eq!(scan["status"], "done", "{scan}");
+    // Two groups: the news/story pair, and — correctly — the exact-duplicate
+    // fixture, whose `?utm_source=feed` copy canonicalises onto the clean URL.
+    // The two duplicate detectors agreeing about that pair is the intended
+    // behaviour; they reach it by different evidence.
+    assert_eq!(
+        scan["stats"]["url_variant_groups"], 2,
+        "both canonical-URL groups in the fixture: {scan}"
+    );
+    assert_eq!(scan["stats"]["url_variant_hits"], 2, "one non-keeper each");
+
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=100").await.json();
+    let variant = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| {
+            c["document_id"] == "http://www.paused.example/news/story/?utm_source=newsletter"
+        })
+        .expect("the news/story variant is flagged");
+
+    // The tracked, www, trailing-slash copy is the one flagged; the clean URL
+    // is the keeper (shortest URL wins under the default policy).
+    assert_eq!(
+        variant["document_id"],
+        "http://www.paused.example/news/story/?utm_source=newsletter"
+    );
+    let reason = variant["reasons"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|r| r["code"] == "url_variant_of")
+        .unwrap();
+    assert_eq!(reason["evidence"]["kept"], "https://paused.example/news/story");
+    assert_eq!(reason["evidence"]["group_size"], 2);
+}
+
+/// Quality gates measure every document and flag only those failing several
+/// checks across distinct families.
+#[tokio::test]
+async fn quality_gates_flag_navigation_chrome_and_spare_real_prose() {
+    let Some(h) = harness().await else {
+        return skip("quality_gates_flag_navigation_chrome_and_spare_real_prose");
+    };
+
+    let scan = run_scan(&h, json!({ "kind": "all" }), json!(["quality"])).await;
+    assert_eq!(scan["status"], "done", "{scan}");
+    assert!(
+        scan["stats"]["quality_measured"].as_i64().unwrap() > 0,
+        "gates must run: {scan}"
+    );
+    assert!(
+        scan["stats"]["profiles_written"].as_i64().unwrap() > 0,
+        "every examined document gets a profile: {scan}"
+    );
+
+    let candidates = get(&h.app, "/api/v1/prune/candidates?detector=quality&limit=100")
+        .await
+        .json();
+    let flagged: Vec<&str> = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|c| c["document_id"].as_str().unwrap())
+        .collect();
+
+    assert!(
+        flagged.contains(&"https://paused.example/site/nav"),
+        "a page of navigation links must be flagged: {flagged:?}"
+    );
+    assert!(
+        !flagged.contains(&"https://paused.example/guide"),
+        "an operations guide is real prose and must survive: {flagged:?}"
+    );
+
+    // Confidence stays below certainty: these are heuristics about text shape.
+    let nav = candidates["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|c| c["document_id"] == "https://paused.example/site/nav")
+        .unwrap();
+    let confidence = nav["confidence"].as_f64().unwrap();
+    assert!(
+        (0.4..=0.85).contains(&confidence),
+        "quality confidence must stay modest, got {confidence}"
+    );
+    let reason = &nav["reasons"][0];
+    assert_eq!(reason["detector"], "quality");
+    assert!(
+        reason["evidence"]["families"].as_i64().unwrap() >= 2,
+        "failures must span families: {reason}"
+    );
+    assert!(
+        !reason["evidence"]["explanations"]
+            .as_array()
+            .unwrap()
+            .is_empty(),
+        "each failure explains its measurement and threshold"
+    );
+}
+
+/// Profiles are written for every document a scan examines, including the ones
+/// it decides are fine — that is what lets a policy be simulated afterwards
+/// without re-scanning.
+#[tokio::test]
+async fn profiles_record_measurements_for_unflagged_documents_too() {
+    let Some(h) = harness().await else {
+        return skip("profiles_record_measurements_for_unflagged_documents_too");
+    };
+
+    run_scan(&h, json!({ "kind": "all" }), json!(["quality", "url_junk"])).await;
+
+    let (profiled, flagged): (i64, i64) = sqlx::query_as(
+        "SELECT (SELECT count(*) FROM ovis.doc_profile), \
+                (SELECT count(*) FROM ovis.prune_candidate WHERE state = 'candidate')",
+    )
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert!(
+        profiled > flagged,
+        "profiles ({profiled}) must cover more than the flagged set ({flagged})"
+    );
+
+    // A specific unflagged document still has its measurements on file.
+    let row: (Option<i32>, Option<String>, i16) = sqlx::query_as(
+        "SELECT word_count, url_class, quality_fail_count FROM ovis.doc_profile \
+         WHERE document_id = 'https://paused.example/guide'",
+    )
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert!(row.0.unwrap_or(0) > 0, "word count recorded");
+    assert_eq!(row.1.as_deref(), Some("page"));
+
+    // And the canonical URL is recorded for every document, so a later
+    // url_variant scan needs no re-measurement.
+    let canonical: Option<String> = sqlx::query_scalar(
+        "SELECT canonical_url FROM ovis.doc_profile \
+         WHERE document_id = 'http://www.paused.example/news/story/?utm_source=newsletter'",
+    )
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        canonical.as_deref(),
+        Some("http://paused.example/news/story"),
+        "scheme, www, trailing slash and tracking parameter all fold"
+    );
+}
+
+/// Verified pairs are stored with their similarity so the acting threshold can
+/// move later without recomputing signatures.
+#[tokio::test]
+async fn near_duplicate_pairs_are_stored_for_later_rethresholding() {
+    let Some(h) = harness().await else {
+        return skip("near_duplicate_pairs_are_stored_for_later_rethresholding");
+    };
+
+    let scan = run_scan(&h, json!({ "kind": "all" }), json!(["near_duplicate"])).await;
+    assert_eq!(scan["status"], "done", "{scan}");
+
+    let pairs: Vec<(String, String, Option<f32>, Option<bool>)> = sqlx::query_as(
+        "SELECT a, b, estimated, same_connector FROM ovis.dup_pair WHERE method = 'minhash'",
+    )
+    .fetch_all(&h.state.db)
+    .await
+    .unwrap();
+    assert!(!pairs.is_empty(), "the guide/guide-copy pair must be stored");
+
+    let (a, b, estimated, same_connector) = &pairs[0];
+    assert!(a < b, "pairs are stored in a canonical order");
+    assert!(
+        estimated.unwrap() >= 0.8,
+        "the stored similarity is the measured one"
+    );
+    assert_eq!(
+        *same_connector,
+        Some(true),
+        "cross-connector pairs are held to a stricter band, so the flag is recorded"
+    );
+
+    // The profile carries each side's strongest similarity.
+    let max_jaccard: Option<f32> = sqlx::query_scalar(
+        "SELECT max_jaccard FROM ovis.doc_profile WHERE document_id = $1",
+    )
+    .bind(a)
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert!(max_jaccard.unwrap() >= 0.8);
 }

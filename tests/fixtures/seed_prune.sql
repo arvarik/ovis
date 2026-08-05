@@ -49,7 +49,29 @@ VALUES
      NULL, now() - interval '12 days', NULL, 2, '{}'::jsonb, false, 'prune-near-a'),
     ('https://paused.example/guide-copy', 0, false, 'Guide (copy)',
      'https://paused.example/guide-copy',
-     NULL, now() - interval '11 days', NULL, 2, '{}'::jsonb, false, 'prune-near-b');
+     NULL, now() - interval '11 days', NULL, 2, '{}'::jsonb, false, 'prune-near-b'),
+    -- v2 fixtures ---------------------------------------------------------
+    -- An image URL indexed as a page: one chunk whose "text" is the filename
+    -- and dimensions. The reference corpus holds 64k of these.
+    ('https://paused.example/media/diagram.png', 0, false, 'diagram.png',
+     'https://paused.example/media/diagram.png',
+     NULL, now() - interval '18 days', NULL, 1, '{}'::jsonb, false, 'prune-asset-1'),
+    -- A PDF, which is *not* an asset on this corpus: real content.
+    ('https://paused.example/reports/annual.pdf', 0, false, 'Annual Report',
+     'https://paused.example/reports/annual.pdf',
+     NULL, now() - interval '18 days', NULL, 1, '{}'::jsonb, false, 'prune-pdf-1'),
+    -- URL-variant pair: same canonical key, deliberately *different* content
+    -- hashes, so only the canonical-URL detector can pair them.
+    ('https://paused.example/news/story', 0, false, 'Story',
+     'https://paused.example/news/story',
+     NULL, now() - interval '9 days', NULL, 2, '{}'::jsonb, false, 'prune-variant-a'),
+    ('http://www.paused.example/news/story/?utm_source=newsletter', 0, false, 'Story (tracked)',
+     'http://www.paused.example/news/story/?utm_source=newsletter',
+     NULL, now() - interval '8 days', NULL, 2, '{}'::jsonb, false, 'prune-variant-b'),
+    -- A navigation-only page: fails several quality gates across families.
+    ('https://paused.example/site/nav', 0, false, 'Navigation',
+     'https://paused.example/site/nav',
+     NULL, now() - interval '20 days', NULL, 1, '{}'::jsonb, false, 'prune-nav-1');
 
 INSERT INTO public.document_by_connector_credential_pair (id, connector_id, credential_id, has_been_indexed)
 VALUES
@@ -61,7 +83,12 @@ VALUES
     ('https://paused.example/already-hidden-stub', 2, 1, true),
     ('https://paused.example/de/impressum', 2, 1, true),
     ('https://paused.example/guide', 2, 1, true),
-    ('https://paused.example/guide-copy', 2, 1, true);
+    ('https://paused.example/guide-copy', 2, 1, true),
+    ('https://paused.example/media/diagram.png', 2, 1, true),
+    ('https://paused.example/reports/annual.pdf', 2, 1, true),
+    ('https://paused.example/news/story', 2, 1, true),
+    ('http://www.paused.example/news/story/?utm_source=newsletter', 2, 1, true),
+    ('https://paused.example/site/nav', 2, 1, true);
 
 -- A tag on one duplicate, so the reaper's cascade has an FK child to clear.
 INSERT INTO public.document__tag (document_id, tag_id)

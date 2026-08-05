@@ -27,6 +27,9 @@ use serde_json::{json, Value};
 
 use crate::services::prune::CompiledRule;
 use crate::state::AppState;
+use ovis_core::db::profile as profile_db;
+use ovis_core::db::profile::DocProfile;
+use ovis_prune::{quality, urlkey};
 
 const RECRAWLING_STATES: [&str; 2] = ["ACTIVE", "INITIAL_INDEXING"];
 
@@ -104,6 +107,14 @@ pub struct ScanStats {
     pub oversized_buckets: i64,
     pub near_pairs_verified: i64,
     pub near_hits: i64,
+    // v2 counters
+    pub profiles_written: i64,
+    pub quality_measured: i64,
+    pub quality_hits: i64,
+    pub asset_hits: i64,
+    pub url_variant_groups: i64,
+    pub url_variant_hits: i64,
+    pub pairs_stored: i64,
 }
 
 impl ScanStats {
@@ -341,6 +352,9 @@ struct ScanCtx<'a> {
     tag_rules: Vec<CompiledRule>,
     engine: Option<MinHashDedupEngine>,
     minhash_config_hash: String,
+    /// The scan's own config hash, stamped onto every profile so a later scan
+    /// can tell which measurements are stale.
+    config_hash: String,
 }
 
 impl ScanCtx<'_> {
@@ -349,7 +363,7 @@ impl ScanCtx<'_> {
     }
 
     fn wants_content(&self) -> bool {
-        self.wants("near_duplicate") || self.wants("language")
+        self.wants("near_duplicate") || self.wants("language") || self.wants("quality")
     }
 }
 
@@ -376,6 +390,7 @@ async fn execute(
         tag_rules,
         engine,
         minhash_config_hash,
+        config_hash: scan.config_hash.clone(),
     };
 
     // Restore checkpoint + stats from the scan row (resume case).
@@ -411,9 +426,18 @@ async fn execute(
     }
 
     // ---- phase 1: the document walk ----
-    let walk_wanted = ["thin", "url_rule", "tag_rule", "stale", "language", "near_duplicate"]
-        .iter()
-        .any(|d| ctx.wants(d));
+    let walk_wanted = [
+        "thin",
+        "url_rule",
+        "tag_rule",
+        "stale",
+        "language",
+        "near_duplicate",
+        "quality",
+        "url_junk",
+    ]
+    .iter()
+    .any(|d| ctx.wants(d));
     if walk_wanted && !done(&checkpoint, "documents") {
         let mut cursor = if checkpoint.phase.as_deref() == Some("documents") {
             checkpoint.cursor.clone()
@@ -447,8 +471,25 @@ async fn execute(
                 HashMap::new()
             };
 
+            // Accumulated per page, flushed in one round trip each. The v1
+            // loop wrote every candidate individually, which is what made the
+            // full-corpus scan LAN-latency-bound rather than database-bound.
+            let mut page_profiles: Vec<DocProfile> = Vec::with_capacity(page.len());
+            let mut page_hits: Vec<DetectorHit> = Vec::new();
+
             for doc in &page {
                 let mut reasons: Vec<PruneReason> = Vec::new();
+                let mut profile = base_profile(doc, &ctx.config_hash);
+
+                // URL shape is free — no text, no index round trip — so it is
+                // measured for every document regardless of which detectors
+                // were asked for.
+                if let Some(reason) = url_signals(doc, &ctx.config, &mut profile) {
+                    if ctx.wants("url_junk") {
+                        stats.asset_hits += 1;
+                        reasons.push(reason);
+                    }
+                }
 
                 if ctx.wants("thin") {
                     if let Some(reason) = stub_reason(doc, &ctx.config) {
@@ -488,7 +529,7 @@ async fn execute(
                 // near-duplicate signature. 0-chunk documents have nothing to
                 // fetch (the stub detector owns them).
                 if ctx.wants_content() && doc.chunk_count != Some(0) {
-                    match content_pass(&ctx, doc, &mut stats).await {
+                    match content_pass(&ctx, doc, &mut stats, &mut profile).await {
                         Ok(mut content_reasons) => {
                             consecutive_content_errors = 0;
                             reasons.append(&mut content_reasons);
@@ -512,12 +553,24 @@ async fn execute(
                     }
                 }
 
+                page_profiles.push(profile);
                 if !reasons.is_empty() {
-                    let outcome =
-                        db::upsert_candidate(&state.db, Some(scan.id), &hit_from(doc, reasons))
-                            .await?;
-                    stats.record(outcome);
+                    page_hits.push(hit_from(doc, reasons));
                 }
+            }
+
+            // A profile is written for every document examined, flagged or
+            // not: policy has to be able to answer "what would a looser
+            // setting catch?", and that means knowing about the documents a
+            // scan decided were fine.
+            match profile_db::upsert_profiles(&state.db, &page_profiles).await {
+                Ok(written) => stats.profiles_written += written as i64,
+                Err(err) => {
+                    tracing::warn!(error = %err, "writing document profiles failed");
+                }
+            }
+            for outcome in db::upsert_candidates(&state.db, Some(scan.id), &page_hits).await? {
+                stats.record(outcome);
             }
 
             examined += page.len() as i64;
@@ -571,6 +624,8 @@ async fn execute(
                 }
             }
 
+            let mut page_hits: Vec<DetectorHit> = Vec::new();
+            let mut group_memberships: Vec<(String, String, i32)> = Vec::new();
             for (hash, group) in by_hash {
                 if group.len() < 2 {
                     continue;
@@ -578,15 +633,36 @@ async fn execute(
                 stats.dup_groups += 1;
                 let keeper = select_keeper(&group, ctx.config.dedup.prefer_keep);
                 for member in &group {
+                    // The keeper is recorded as a group member too: review
+                    // needs to show the whole cluster, and policy excludes
+                    // keepers by their role rather than by their absence.
+                    group_memberships.push((
+                        member.id.clone(),
+                        if member.id == keeper.id {
+                            format!("hash-keeper:{hash}")
+                        } else {
+                            format!("hash:{hash}")
+                        },
+                        group.len() as i32,
+                    ));
                     if member.id == keeper.id {
                         continue;
                     }
                     stats.dup_members += 1;
-                    let hit =
-                        exact_dup_hit(member, keeper, hash, group.len(), ctx.config.dedup.prefer_keep);
-                    let outcome = db::upsert_candidate(&state.db, Some(scan.id), &hit).await?;
-                    stats.record(outcome);
+                    page_hits.push(exact_dup_hit(
+                        member,
+                        keeper,
+                        hash,
+                        group.len(),
+                        ctx.config.dedup.prefer_keep,
+                    ));
                 }
+            }
+            if let Err(err) = profile_db::set_dup_groups(&state.db, &group_memberships).await {
+                tracing::warn!(error = %err, "recording duplicate-group membership failed");
+            }
+            for outcome in db::upsert_candidates(&state.db, Some(scan.id), &page_hits).await? {
+                stats.record(outcome);
             }
 
             cursor = groups.last().map(|(h, _)| h.clone());
@@ -607,6 +683,113 @@ async fn execute(
             tokio::task::yield_now().await;
         }
         checkpoint.done.push("exact".into());
+        checkpoint.cursor = None;
+        checkpoint.phase = None;
+    }
+
+    // ---- phase 2b: URL-variant groups ----
+    //
+    // Documents whose canonical URL matches are the same page reached by
+    // different routes: tracking parameters, http/https, trailing slashes,
+    // index filenames. Onyx's content_hash misses these whenever the two
+    // crawls extracted even slightly different bytes, which a timestamp in a
+    // footer is enough to cause.
+    if ctx.wants("url_variant") && !done(&checkpoint, "url_variant") {
+        let mut cursor = if checkpoint.phase.as_deref() == Some("url_variant") {
+            checkpoint.cursor.clone()
+        } else {
+            None
+        };
+        loop {
+            let groups =
+                profile_db::canonical_url_groups(&state.db, cursor.as_deref(), EXACT_GROUP_PAGE)
+                    .await?;
+            if groups.is_empty() {
+                break;
+            }
+            let keys: Vec<String> = groups.iter().map(|(k, _)| k.clone()).collect();
+            let memberships = profile_db::documents_for_canonical_urls(&state.db, &keys).await?;
+
+            let mut by_key: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            for (key, doc_id) in memberships {
+                by_key.entry(key).or_default().push(doc_id);
+            }
+            let all_ids: Vec<String> = by_key.values().flatten().cloned().collect();
+            let rows = db::scan_documents_by_ids(&state.db, Some(&scan.scope), &all_ids).await?;
+            let by_id: HashMap<&str, &ScanDocRow> =
+                rows.iter().map(|d| (d.id.as_str(), d)).collect();
+
+            let mut page_hits: Vec<DetectorHit> = Vec::new();
+            let mut group_memberships: Vec<(String, String, i32)> = Vec::new();
+            for (key, ids) in &by_key {
+                let members: Vec<&ScanDocRow> =
+                    ids.iter().filter_map(|id| by_id.get(id.as_str()).copied()).collect();
+                if members.len() < 2 {
+                    continue;
+                }
+                stats.url_variant_groups += 1;
+                let keeper = select_keeper(&members, ctx.config.dedup.prefer_keep);
+                for member in &members {
+                    group_memberships.push((
+                        member.id.clone(),
+                        if member.id == keeper.id {
+                            format!("url-keeper:{key}")
+                        } else {
+                            format!("url:{key}")
+                        },
+                        members.len() as i32,
+                    ));
+                    if member.id == keeper.id {
+                        continue;
+                    }
+                    stats.url_variant_hits += 1;
+                    page_hits.push(hit_from(
+                        member,
+                        vec![PruneReason {
+                            detector: "url_junk".into(),
+                            code: "url_variant_of".into(),
+                            detail: format!(
+                                "same canonical URL as {} (group of {}; keeper chosen by {})",
+                                keeper.id,
+                                members.len(),
+                                policy_name(ctx.config.dedup.prefer_keep),
+                            ),
+                            confidence: ctx.config.url_junk.url_variant_confidence,
+                            evidence: json!({
+                                "kept": keeper.id,
+                                "canonical_url": key,
+                                "group_size": members.len(),
+                                "policy": policy_name(ctx.config.dedup.prefer_keep),
+                            }),
+                        }],
+                    ));
+                }
+            }
+            if let Err(err) = profile_db::set_dup_groups(&state.db, &group_memberships).await {
+                tracing::warn!(error = %err, "recording URL-variant membership failed");
+            }
+            for outcome in db::upsert_candidates(&state.db, Some(scan.id), &page_hits).await? {
+                stats.record(outcome);
+            }
+
+            cursor = groups.last().map(|(k, _)| k.clone());
+            checkpoint.phase = Some("url_variant".into());
+            checkpoint.cursor = cursor.clone();
+            let status = db::scan_checkpoint(
+                &state.db,
+                scan.id,
+                examined,
+                Some(total),
+                &serde_json::to_value(&checkpoint).unwrap_or_default(),
+                &stats.to_json(),
+            )
+            .await?;
+            if status == "cancelled" {
+                return Ok((ScanEnd::Cancelled, stats));
+            }
+            tokio::task::yield_now().await;
+        }
+        checkpoint.done.push("url_variant".into());
         checkpoint.cursor = None;
         checkpoint.phase = None;
     }
@@ -685,11 +868,92 @@ fn parse_band_cursor(raw: &str) -> Option<(i16, i64)> {
 // Content pass
 // ---------------------------------------------------------------------------
 
+/// The measurements every document gets, whether or not anything flags it.
+fn base_profile(doc: &ScanDocRow, config_hash: &str) -> DocProfile {
+    DocProfile {
+        document_id: doc.id.clone(),
+        config_hash: Some(config_hash.to_string()),
+        fingerprint: Some(fingerprint_of(doc)),
+        connector_id: doc.connector_id,
+        chunk_count: doc.chunk_count,
+        content_hash: doc.content_hash.clone(),
+        // Exact-duplicate membership is decided in the hash phase, which knows
+        // the group size; leaving it None here keeps the COALESCE upsert from
+        // erasing what that phase wrote.
+        ..DocProfile::default()
+    }
+}
+
+/// URL-shape signals: canonical key, class, and the asset reason.
+///
+/// Writes into the profile unconditionally (it is free) and returns a reason
+/// only when the document is an asset whose indexed text is a crawl artefact
+/// rather than content — an image URL with one chunk saying
+/// `photo.jpg (1200×800)`.
+fn url_signals(
+    doc: &ScanDocRow,
+    config: &PruneConfig,
+    profile: &mut DocProfile,
+) -> Option<PruneReason> {
+    let url = doc.link.as_deref().unwrap_or(&doc.id);
+    profile.canonical_url = urlkey::canonical_key(url);
+    profile.path_depth = Some(urlkey::path_depth(url) as i16);
+    profile.has_query = Some(urlkey::has_query(url));
+    let class = urlkey::classify(url);
+    profile.url_class = Some(class.code().to_string());
+    if config.url_junk.flag_archive_editions {
+        profile.archive_of = urlkey::archive_edition_of(url);
+    }
+
+    let exempt = doc
+        .connector_name
+        .as_deref()
+        .map(|name| config.url_junk.exempt_connectors.iter().any(|c| c == name))
+        .unwrap_or(false);
+    if exempt {
+        return None;
+    }
+
+    let flaggable = if class.is_asset() {
+        config.url_junk.flag_assets
+    } else if class == urlkey::UrlClass::BinaryDocument {
+        config.url_junk.flag_binary_documents
+    } else {
+        false
+    };
+    if !flaggable {
+        return None;
+    }
+    // An asset with real extracted text (an OCR'd scan, a PDF-backed image) is
+    // content; only the ones whose chunk count says "filename and dimensions"
+    // are junk.
+    let chunk_count = doc.chunk_count?;
+    if chunk_count > config.url_junk.asset_max_chunks {
+        return None;
+    }
+
+    Some(PruneReason {
+        detector: "url_junk".into(),
+        code: "asset_url".into(),
+        detail: format!(
+            "{} URL indexed as a page, with {chunk_count} chunk(s) of extracted text",
+            class.code()
+        ),
+        confidence: config.url_junk.asset_confidence,
+        evidence: json!({
+            "url_class": class.code(),
+            "chunk_count": chunk_count,
+            "max_chunks": config.url_junk.asset_max_chunks,
+        }),
+    })
+}
+
 /// Fetch a document's chunk text once and feed every content detector.
 async fn content_pass(
     ctx: &ScanCtx<'_>,
     doc: &ScanDocRow,
     stats: &mut ScanStats,
+    profile: &mut DocProfile,
 ) -> Result<Vec<PruneReason>, crate::error::AppError> {
     let mut reasons = Vec::new();
 
@@ -719,8 +983,20 @@ async fn content_pass(
             .unwrap_or(true)
     };
     let thin_words_wanted = ctx.wants("thin");
+    let quality_wanted = ctx.wants("quality") && {
+        doc.connector_name
+            .as_deref()
+            .map(|name| {
+                !ctx.config
+                    .quality
+                    .exempt_connectors
+                    .iter()
+                    .any(|c| c == name)
+            })
+            .unwrap_or(true)
+    };
 
-    if !need_signature && !language_wanted && !thin_words_wanted {
+    if !need_signature && !language_wanted && !thin_words_wanted && !quality_wanted {
         return Ok(reasons);
     }
 
@@ -781,6 +1057,47 @@ async fn content_pass(
                     }),
                 });
             }
+        }
+    }
+
+    if quality_wanted {
+        let metrics = quality::measure(&full_text);
+        let failures = quality::evaluate(&metrics, &ctx.config.quality);
+        stats.quality_measured += 1;
+        profile.word_count = Some(metrics.word_count as i32);
+        profile.quality_metrics = serde_json::to_value(&metrics).ok();
+        profile.quality_gates = Some(failures.iter().map(|g| g.code().to_string()).collect());
+        profile.quality_fail_count = failures.len() as i16;
+        profile.quality_families = quality::families_failed(&failures) as i16;
+
+        // Measured always; flagged only when the failures clear both bars.
+        // A document clipped at the chunk cap is measured on a prefix, so its
+        // length-shaped gates would be measuring the cap rather than the page.
+        if !clipped && quality::is_candidate(&failures, &ctx.config.quality) {
+            stats.quality_hits += 1;
+            let explanations: Vec<String> = failures
+                .iter()
+                .map(|g| g.explain(&metrics, &ctx.config.quality))
+                .collect();
+            reasons.push(PruneReason {
+                detector: "quality".into(),
+                code: "low_quality_text".into(),
+                detail: format!(
+                    "{} quality gates failed across {} categories: {}",
+                    failures.len(),
+                    quality::families_failed(&failures),
+                    explanations.join("; ")
+                ),
+                confidence: quality::confidence(&failures, &ctx.config.quality),
+                evidence: json!({
+                    "gates": failures.iter().map(|g| g.code()).collect::<Vec<_>>(),
+                    "families": quality::families_failed(&failures),
+                    "explanations": explanations,
+                    "word_count": metrics.word_count,
+                    "min_failures": ctx.config.quality.min_failures,
+                    "min_families": ctx.config.quality.min_families,
+                }),
+            });
         }
     }
 
@@ -902,6 +1219,46 @@ async fn near_pairs_for_bucket(
             .map(|d| d.id)
             .collect();
     let by_id: HashMap<&str, &ScanDocRow> = rows.iter().map(|d| (d.id.as_str(), d)).collect();
+
+    // Every verified pair is stored, including ones below the acting
+    // threshold. That is what makes the threshold a review-time decision: the
+    // dial can be lowered later without recomputing a single signature.
+    let pairs: Vec<profile_db::DupPair> = hits
+        .iter()
+        .filter_map(|(a, b, sim)| {
+            let (doc_a, doc_b) = (by_id.get(a.as_str())?, by_id.get(b.as_str())?);
+            Some(profile_db::DupPair {
+                a: a.clone(),
+                b: b.clone(),
+                method: "minhash".into(),
+                estimated: Some(*sim as f32),
+                verified: None,
+                cosine: None,
+                same_connector: Some(doc_a.connector_id == doc_b.connector_id),
+            })
+        })
+        .collect();
+    match profile_db::upsert_pairs(&ctx.state.db, &pairs).await {
+        Ok(n) => stats.pairs_stored += n as i64,
+        Err(err) => tracing::warn!(error = %err, "storing duplicate pairs failed"),
+    }
+
+    // Both sides record the similarity: policy thresholds read the profile,
+    // and which side ends up flagged is a keeper decision made below.
+    let similarities: Vec<(String, f32, String)> = hits
+        .iter()
+        .flat_map(|(a, b, sim)| {
+            [
+                (a.clone(), *sim as f32, b.clone()),
+                (b.clone(), *sim as f32, a.clone()),
+            ]
+        })
+        .collect();
+    if let Err(err) =
+        profile_db::set_max_similarity(&ctx.state.db, "minhash", &similarities).await
+    {
+        tracing::warn!(error = %err, "recording maximum similarity failed");
+    }
 
     for (a, b, sim) in hits {
         let (Some(doc_a), Some(doc_b)) = (by_id.get(a.as_str()), by_id.get(b.as_str())) else {
