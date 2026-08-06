@@ -19,7 +19,7 @@ use super::{
 };
 
 pub(super) async fn list_models(provider: &Provider) -> CoreResult<Vec<ModelInfo>> {
-    let response = send_json(provider.http().get(provider.url("/api/tags")), "list models").await?;
+    let response = send_json(provider.authed(provider.http().get(provider.url("/api/tags"))), "list models").await?;
 
     let entries = response
         .get("models")
@@ -95,7 +95,7 @@ pub(super) async fn complete(
     }
 
     let response = send_json(
-        provider.http().post(provider.url("/api/chat")).json(&body),
+        provider.authed(provider.http().post(provider.url("/api/chat")).json(&body)),
         "completion",
     )
     .await?;

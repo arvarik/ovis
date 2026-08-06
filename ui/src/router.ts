@@ -8,6 +8,7 @@ import { connectorDetailRoute } from './routes/connectors/ccPairId';
 import { activityRoute } from './routes/activity';
 import { statsRoute } from './routes/stats';
 import { pruneRoute } from './routes/prune';
+import { modelsRoute } from './routes/models';
 import { labRoute } from './routes/lab';
 
 const routeTree = rootRoute.addChildren([
@@ -18,6 +19,7 @@ const routeTree = rootRoute.addChildren([
   activityRoute,
   statsRoute,
   pruneRoute,
+  modelsRoute,
   labRoute,
 ]);
 

@@ -32,7 +32,7 @@ const FINAL_CHANNEL_PREFILL: &str = "<|channel>final<|message>";
 
 pub(super) async fn list_models(provider: &Provider) -> CoreResult<Vec<ModelInfo>> {
     let response = send_json(
-        provider.http().get(provider.url("/v1/models")),
+        provider.authed(provider.http().get(provider.url("/v1/models"))),
         "list models",
     )
     .await?;
@@ -112,7 +112,7 @@ pub(super) async fn complete(
     }
 
     let response = send_json(
-        provider.http().post(provider.url("/completion")).json(&body),
+        provider.authed(provider.http().post(provider.url("/completion")).json(&body)),
         "completion",
     )
     .await?;
@@ -240,6 +240,34 @@ mod tests {
         assert_eq!(out.text, "no");
         assert!(!out.had_thinking);
         assert_eq!(out.prompt_tokens, Some(698));
+    }
+
+    /// `llama-server --api-key` exists, so the key has to reach the wire when
+    /// one is configured — and has to stay off it when one is not, because an
+    /// unauthenticated server rejects a bearer header it did not ask for.
+    #[tokio::test]
+    async fn a_key_is_sent_only_when_one_is_configured() {
+        for key in [Some("sk-local"), None] {
+            let server = wiremock::MockServer::start().await;
+            let expected = key.map(|k| format!("Bearer {k}"));
+            wiremock::Mock::given(wiremock::matchers::method("GET"))
+                .and(wiremock::matchers::path("/v1/models"))
+                .respond_with(move |request: &wiremock::Request| {
+                    let sent = request
+                        .headers
+                        .get("authorization")
+                        .map(|v| v.to_str().unwrap().to_string());
+                    assert_eq!(sent, expected, "authorization header for key {key:?}");
+                    wiremock::ResponseTemplate::new(200).set_body_json(json!({ "models": [] }))
+                })
+                .mount(&server)
+                .await;
+
+            let provider =
+                Provider::new(ProviderKind::LlamaCpp, Some(&server.uri()), key.map(String::from))
+                    .unwrap();
+            provider.list_models().await.unwrap();
+        }
     }
 
     #[tokio::test]

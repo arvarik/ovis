@@ -125,6 +125,11 @@ export const api = {
     return request<T>('PATCH', path, { body, signal });
   },
 
+  /** PUT with a JSON body — idempotent replacement, as in role assignment. */
+  put<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+    return request<T>('PUT', path, { body: body ?? {}, signal });
+  },
+
   /** PUT with a raw text body (the prune config YAML import). */
   async putText<T>(path: string, text: string, contentType: string): Promise<T> {
     const res = await fetch(BASE + path, {

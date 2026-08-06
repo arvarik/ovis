@@ -886,3 +886,84 @@ export interface TrashBulkResponse {
   action: string;
   outcomes: TrashRestoreOutcome[];
 }
+
+// ---------------------------------------------------------------------------
+// LLM providers, models and roles
+// ---------------------------------------------------------------------------
+
+export type LlmProviderKind =
+  | 'openai_compatible'
+  | 'gemini'
+  | 'anthropic'
+  | 'ollama'
+  | 'llamacpp';
+
+export interface LlmProvider {
+  id: number;
+  name: string;
+  kind: LlmProviderKind;
+  base_url: string | null;
+  /** The NAME of an environment variable — never a key. */
+  api_key_ref: string | null;
+  enabled: boolean;
+  created_at: string;
+  /** Whether that environment variable is actually set on the server. */
+  key_present: boolean;
+  models: number;
+  probed: number;
+}
+
+/** What a probe measured. Absent when the model has never been probed — which
+ *  is different from "probed and found incapable". */
+export interface LlmCapabilities {
+  enum_enforced: boolean;
+  schema_enforced: boolean;
+  logprobs: boolean;
+  thinking_channel: 'none' | 'suppressed' | 'unsuppressed';
+  notes: string[];
+  probe_version: number;
+  probed_at: string;
+}
+
+export interface LlmAdvertised {
+  context_tokens: number | null;
+  output_tokens: number | null;
+  reasoning: boolean | null;
+  is_embedding: boolean;
+  description: string | null;
+}
+
+export interface LlmModel {
+  provider_id: number;
+  provider_name: string;
+  provider_kind: LlmProviderKind;
+  model_id: string;
+  display_name: string | null;
+  advertised: LlmAdvertised | null;
+  capabilities: LlmCapabilities | null;
+  probed_at: string | null;
+  probe_version: number | null;
+  /** Every role this model holds; a model may hold several. */
+  roles: string[];
+}
+
+export interface LlmProbeResult {
+  provider_id: number;
+  model_id: string;
+  capabilities: LlmCapabilities;
+  summary: string;
+  usable_as_judge: boolean;
+  calibratable: boolean;
+}
+
+export type LlmRole = 'bulk' | 'quality' | 'narrate';
+
+export interface LlmRoleAssignment {
+  provider_id: number;
+  provider_name: string;
+  model_id: string;
+  display_name: string | null;
+  capabilities: LlmCapabilities | null;
+}
+
+export type LlmRoles = Record<LlmRole, LlmRoleAssignment | null>;

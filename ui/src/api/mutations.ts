@@ -30,6 +30,9 @@ import type {
   PrunePolicy,
   PruneCommitResponse,
   TrashBulkResponse,
+  LlmProvider,
+  LlmProbeResult,
+  LlmRoles,
 } from './types';
 import { count as formatCount } from '@/lib/format';
 
@@ -613,5 +616,92 @@ export function useTrashHold() {
       );
     },
     onError: (error) => errorToast('Hold failed', error),
+  });
+}
+
+// --- llm providers, probes and roles ---
+
+export function useLlmProviderCreate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: {
+      name: string;
+      kind: string;
+      base_url?: string;
+      api_key_ref?: string;
+    }) => api.post<LlmProvider>('/llm/providers', body),
+    onSuccess: (provider) => {
+      void queryClient.invalidateQueries({ queryKey: ['llm'] });
+      toast.success(`${provider.name} connected`, {
+        description: `${formatCount(provider.models)} model${provider.models === 1 ? '' : 's'} found. Probe them to see what each one can actually do.`,
+      });
+    },
+    onError: (error) => errorToast('Could not connect', error),
+  });
+}
+
+export function useLlmProviderDelete() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.delete<{ deleted: boolean }>(`/llm/providers/${id}`),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['llm'] });
+      toast.success('Provider removed');
+    },
+    onError: (error) => errorToast('Could not remove provider', error),
+  });
+}
+
+export function useLlmProbe() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ providerId, modelId }: { providerId: number; modelId: string }) =>
+      api.post<LlmProbeResult>(`/llm/models/${providerId}/probe`, { model_id: modelId }),
+    onSuccess: (result) => {
+      void queryClient.invalidateQueries({ queryKey: ['llm'] });
+      if (result.usable_as_judge) {
+        toast.success(`${result.model_id} can be used`, { description: result.summary });
+      } else {
+        // Not an error — a finding. The model stays listed with its reason.
+        toast.warning(`${result.model_id} cannot judge documents`, {
+          description:
+            result.capabilities.notes[0] ??
+            'No output constraint held, so a document could make it emit arbitrary text.',
+        });
+      }
+    },
+    onError: (error) => errorToast('Probe failed', error),
+  });
+}
+
+export function useLlmProbeAll() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (providerId: number) =>
+      api.post<{ probed: number; usable_as_judge: number; skipped_embedding: number }>(
+        `/llm/providers/${providerId}/probe`,
+      ),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['llm'] });
+      toast.success(`Probed ${formatCount(res.probed)}`, {
+        description: `${formatCount(res.usable_as_judge)} can judge documents${res.skipped_embedding ? `, ${formatCount(res.skipped_embedding)} embedding models skipped` : ''}.`,
+      });
+    },
+    onError: (error) => errorToast('Probing failed', error),
+  });
+}
+
+export function useLlmAssignRole() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { role: string; provider_id?: number; model_id?: string }) =>
+      api.put<LlmRoles>('/llm/roles', body),
+    onSuccess: (_roles, body) => {
+      void queryClient.invalidateQueries({ queryKey: ['llm'] });
+      toast.success(
+        body.model_id ? `${body.role} → ${body.model_id}` : `${body.role} cleared`,
+      );
+    },
+    onError: (error) => errorToast('Could not assign role', error),
   });
 }

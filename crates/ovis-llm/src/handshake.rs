@@ -310,8 +310,26 @@ pub(crate) fn extract_answer(text: &str) -> String {
     trimmed.trim_matches('"').to_string()
 }
 
+/// A short, readable reason from a provider error.
+///
+/// Raw provider errors carry a truncated JSON body — `HTTP 404 Not Found: {`
+/// — which is noise in a UI that shows one line per finding. Keep the status
+/// and drop the body.
 fn first_line(err: &ovis_core::error::CoreError) -> String {
-    crate::provider::truncate(err.to_string().lines().next().unwrap_or_default(), 120)
+    let text = err.to_string();
+    let first = text.lines().next().unwrap_or_default();
+    // Strip our own wrapper prefixes and any JSON body that follows. The
+    // `invalid input:` prefix is the error *variant* leaking into prose.
+    let first = first.strip_prefix("invalid input: ").unwrap_or(first);
+    let without_wrapper = first
+        .rsplit_once("completion: ")
+        .map(|(_, rest)| rest)
+        .unwrap_or(first);
+    let without_body = without_wrapper
+        .split_once(": {")
+        .map(|(head, _)| head)
+        .unwrap_or(without_wrapper);
+    crate::provider::truncate(without_body.trim(), 120)
 }
 
 #[cfg(test)]
@@ -517,5 +535,30 @@ mod thinking_semantics_tests {
         let loose = caps(false, ThinkingChannel::Unsuppressed);
         assert!(loose.thinking_blocks_judging());
         assert!(loose.summary().contains("NOT suppressible"));
+    }
+}
+
+#[cfg(test)]
+mod message_tests {
+    use super::first_line;
+    use ovis_core::error::CoreError;
+
+    /// Probe findings are shown one per line in the UI; a truncated JSON body
+    /// makes four near-identical failures unreadable.
+    #[test]
+    fn provider_errors_are_reduced_to_a_readable_reason() {
+        let raw = CoreError::Invalid(
+            "completion: HTTP 404 Not Found: {\n  \"error\": {\n    \"code\": 404".into(),
+        );
+        assert_eq!(first_line(&raw), "HTTP 404 Not Found");
+
+        let with_message = CoreError::Invalid(
+            "completion: HTTP 400 Bad Request: {\"error\":{\"message\":\"blah\"}}".into(),
+        );
+        assert_eq!(first_line(&with_message), "HTTP 400 Bad Request");
+
+        // A plain message survives intact.
+        let plain = CoreError::Invalid("connection refused".into());
+        assert_eq!(first_line(&plain), "connection refused");
     }
 }

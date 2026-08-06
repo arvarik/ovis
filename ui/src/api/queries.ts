@@ -34,6 +34,9 @@ import type {
   PruneSamplePlan,
   TrashItem,
   TrashDetail,
+  LlmProvider,
+  LlmModel,
+  LlmRoles,
 } from './types';
 import type { PagesSearch } from '@/routes/pages';
 
@@ -441,3 +444,31 @@ export function trashDetailQuery(documentId: string) {
     staleTime: 30_000,
   });
 }
+
+// --- llm ---
+
+export const llmProvidersQuery = queryOptions({
+  queryKey: ['llm', 'providers'],
+  queryFn: ({ signal }) =>
+    api.get<{ items: LlmProvider[] }>('/llm/providers', undefined, signal),
+  staleTime: 10_000,
+});
+
+export function llmModelsQuery(providerId?: number) {
+  return queryOptions({
+    queryKey: ['llm', 'models', providerId ?? 'all'],
+    queryFn: ({ signal }) =>
+      api.get<{ items: LlmModel[] }>(
+        '/llm/models',
+        providerId ? { provider_id: providerId } : undefined,
+        signal,
+      ),
+    staleTime: 10_000,
+  });
+}
+
+export const llmRolesQuery = queryOptions({
+  queryKey: ['llm', 'roles'],
+  queryFn: ({ signal }) => api.get<LlmRoles>('/llm/roles', undefined, signal),
+  staleTime: 10_000,
+});

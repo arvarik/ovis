@@ -11,7 +11,8 @@ const base = process.argv[2] ?? 'http://localhost:3001';
 const routes = ['/pages', '/pages?q=kant', '/connectors', '/connectors/5', '/activity', '/stats', '/prune', '/prune?tab=triage',
   '/prune?tab=clusters',
   '/prune?tab=trash',
-  '/prune?tab=staged', '/prune?tab=rules', '/prune?tab=history'];
+  '/prune?tab=staged', '/prune?tab=rules', '/prune?tab=history',
+  '/models'];
 
 const browser = await chromium.launch({ channel: 'chrome', headless: true, args: ['--no-sandbox'] });
 const page = await (await browser.newContext({ viewport: { width: 1280, height: 900 } })).newPage();

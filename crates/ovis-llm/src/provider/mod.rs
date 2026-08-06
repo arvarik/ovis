@@ -255,6 +255,20 @@ impl Provider {
         format!("{}/{}", self.base_url, path.trim_start_matches('/'))
     }
 
+    /// Attach bearer auth when a key is configured, and not otherwise.
+    ///
+    /// Self-hosted servers accept a key as an *option*: `llama-server
+    /// --api-key`, or an Ollama sitting behind a reverse proxy. Sending an
+    /// empty header to one that wants nothing is a 401 where there should have
+    /// been a 200, so the key has to stay optional at the request layer rather
+    /// than being decided per provider kind.
+    pub(crate) fn authed(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+        match self.key() {
+            Ok(key) => req.bearer_auth(key),
+            Err(_) => req,
+        }
+    }
+
     /// Every model the endpoint offers, normalized.
     pub async fn list_models(&self) -> CoreResult<Vec<ModelInfo>> {
         let mut models = match self.kind {

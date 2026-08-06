@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useRouterState } from '@tanstack/react-router';
-import { Activity, BarChart3, Cable, FileText, Pin, Scissors } from 'lucide-react';
+import { Activity, BarChart3, Bot, Cable, FileText, Pin, Scissors } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { overviewQuery } from '@/api/queries';
 import { cn } from '@/lib/cn';
@@ -15,6 +15,7 @@ export const NAV_ENTRIES = [
   { to: '/activity', label: 'Activity', icon: Activity },
   { to: '/prune', label: 'Prune', icon: Scissors },
   { to: '/stats', label: 'Stats', icon: BarChart3 },
+  { to: '/models', label: 'Models', icon: Bot },
 ] as const;
 
 /**
