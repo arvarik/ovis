@@ -41,7 +41,7 @@ humantime = "2"
 ratatui = "0.29"
 crossterm = { version = "0.29", features = ["event-stream"] }
 open = "5"
-directories = "5"
+directories = "6"
 percent-encoding = { workspace = true }
 unicode-width = "0.2"
 tracing = { workspace = true }
