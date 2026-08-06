@@ -70,7 +70,9 @@ ui/scripts/shots/
 # (Both were also purged from git history before the remote existed.)
 implementation/
 redesign/
-docs/pruning-v2-design.md
+# Pruning design notes: corpus measurements, deferred ideas, implementation
+# plans. Same class as redesign/ — local working documents, never pushed.
+docs/pruning/
 
 # ---------------------------------------------------------------------------
 # Editors and operating systems

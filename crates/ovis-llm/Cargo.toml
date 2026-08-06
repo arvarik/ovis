@@ -1,0 +1,22 @@
+[package]
+name = "ovis-llm"
+version = "0.3.0"
+edition = "2021"
+description = "Provider-agnostic LLM access for OVIS: model discovery, capability probing, and constrained scoring"
+publish = false
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+ovis-core = { path = "../ovis-core" }
+tokio = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+chrono = { workspace = true }
+tracing = { workspace = true }
+sha2 = "0.10"
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = "0.6"

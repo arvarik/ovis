@@ -5,6 +5,7 @@ members = [
     "crates/ovis-backend",
     "crates/ovis-bench",
     "crates/ovis-cli",
+    "crates/ovis-llm",
     "crates/ovis-prune",
 ]
 

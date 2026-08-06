@@ -2244,6 +2244,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "ovis-llm"
+version = "0.3.0"
+dependencies = [
+ "chrono",
+ "ovis-core",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "tokio",
+ "tracing",
+ "wiremock",
+]
+
+[[package]]
 name = "ovis-prune"
 version = "0.3.0"
 dependencies = [
