@@ -33,7 +33,7 @@ reqwest = { version = "0.12", features = ["json", "gzip"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-base64 = "0.22"
+base64 = "0.23"
 
 # --- errors ---
 thiserror = "2.0"
