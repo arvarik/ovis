@@ -153,9 +153,6 @@ const DDL: &[&str] = &[
         lang               text, \
         lang_confidence    real, \
         content_hash       text, \
-        dup_group          text, \
-        dup_group_size     int, \
-        dup_cross_connector boolean, \
         max_jaccard        real, \
         max_jaccard_doc    text, \
         max_cosine         real, \
@@ -194,7 +191,6 @@ const DDL: &[&str] = &[
     // starts failing. Every column added after `doc_profile` first shipped is
     // therefore also stated as an idempotent ALTER. Both forms are needed: the
     // CREATE for a fresh database, these for an upgraded one.
-    "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS dup_cross_connector boolean",
     "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS judge_score real",
     "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS distilled_score real",
     "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS retrieval_count int",
@@ -214,8 +210,6 @@ const DDL: &[&str] = &[
         ON ovis.doc_profile (max_jaccard DESC) WHERE max_jaccard IS NOT NULL",
     "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_cosine \
         ON ovis.doc_profile (max_cosine DESC) WHERE max_cosine IS NOT NULL",
-    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_dup_group \
-        ON ovis.doc_profile (dup_group) WHERE dup_group IS NOT NULL",
     // Verified pair similarities. Stored rather than thresholded away so the
     // acting threshold can move without recomputing anything (the SemHash
     // operational pattern).
