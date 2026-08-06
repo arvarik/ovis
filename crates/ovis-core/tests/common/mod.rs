@@ -60,14 +60,15 @@ impl DbLock {
                     .execute(&mut conn)
                     .await;
                 if let Err(err) = locked {
-                    eprintln!("could not take the shared test-database lock: {err}");
-                    return Self(None);
+                    // Failing open would let suites run unserialized against one
+                    // database and surface as unrelated assertion failures much
+                    // later. Fail loudly here instead.
+                    panic!("could not take the shared test-database lock: {err}");
                 }
                 Self(Some(conn))
             }
             Err(err) => {
-                eprintln!("could not open a lock connection: {err}");
-                Self(None)
+                panic!("could not open a lock connection to the test database: {err}");
             }
         }
     }

@@ -828,7 +828,7 @@ pub async fn simulate(pool: &PgPool, policy: &Policy) -> CoreResult<SimulationRe
             });
         }
     }
-    by_signal.sort_by(|a, b| b.count.cmp(&a.count));
+    by_signal.sort_by_key(|s| std::cmp::Reverse(s.count));
 
     let connector_rows = sqlx::query(&format!(
         "SELECT p.connector_id, c.name AS connector_name, \

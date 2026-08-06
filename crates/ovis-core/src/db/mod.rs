@@ -16,6 +16,7 @@
 pub mod connectors;
 pub mod documents;
 pub mod indexing;
+pub mod llm;
 pub mod pending_deletes;
 pub mod pool;
 pub mod probe;

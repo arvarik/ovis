@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 ovis-core = { path = "../ovis-core" }
+ovis-llm = { path = "../ovis-llm" }
 ovis-prune = { path = "../ovis-prune" }
 sha2 = "0.10"
 regex = "1.10"

@@ -8,6 +8,7 @@ use crate::state::AppState;
 
 pub mod connectors;
 pub mod indexing;
+pub mod llm;
 pub mod pages;
 pub mod prune;
 pub mod search;
@@ -145,6 +146,14 @@ pub fn api_router(state: AppState) -> Router {
         .route("/prune/audit", get(prune::audit))
         .route("/prune/exclusions", get(prune::exclusions))
         .route("/prune/exclusions/{id}", delete(prune::delete_exclusion))
+        // --- llm providers and models ---
+        .route("/llm/providers", get(llm::list_providers).post(llm::create_provider))
+        .route("/llm/providers/{id}", delete(llm::delete_provider))
+        .route("/llm/providers/{id}/discover", post(llm::rediscover))
+        .route("/llm/providers/{id}/probe", post(llm::probe_provider))
+        .route("/llm/models", get(llm::list_models))
+        .route("/llm/models/{provider_id}/probe", post(llm::probe_model))
+        .route("/llm/roles", get(llm::roles).put(llm::assign_role))
         // --- tags ---
         .route("/tags", get(tags::list))
         .route("/tags/keys", get(tags::keys))

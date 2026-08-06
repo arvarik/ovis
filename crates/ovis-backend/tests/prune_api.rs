@@ -110,14 +110,15 @@ impl DbLock {
                     .execute(&mut conn)
                     .await
                 {
-                    eprintln!("could not take the shared test-database lock: {err}");
-                    return Self(None);
+                    // Failing open would let suites run unserialized against one
+                    // database and surface as unrelated assertion failures much
+                    // later. Fail loudly here instead.
+                    panic!("could not take the shared test-database lock: {err}");
                 }
                 Self(Some(conn))
             }
             Err(err) => {
-                eprintln!("could not open a lock connection: {err}");
-                Self(None)
+                panic!("could not open a lock connection to the test database: {err}");
             }
         }
     }
@@ -287,6 +288,7 @@ async fn harness_with(
         ovis_core::db::trash::ensure_tables(&db).await,
         "the trash table must be creatable; the reaper refuses to delete without it"
     );
+    let llm_enabled = ovis_core::db::llm::ensure_tables(&db).await;
     assert!(
         ovis_core::db::pending_deletes::ensure_table(&db).await,
         "the retry queue table must be creatable"
@@ -318,6 +320,7 @@ async fn harness_with(
         build: BuildInfo::current(),
         pending_deletes_enabled: true,
         prune: PruneHandle::new(true, true),
+        llm_enabled,
         metrics: None,
     };
 

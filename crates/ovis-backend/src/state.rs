@@ -275,6 +275,10 @@ pub struct AppState {
     /// delete will be retried.
     pub pending_deletes_enabled: bool,
     pub prune: PruneHandle,
+    /// `false` when the `ovis.llm_*` tables could not be created; every
+    /// `/llm/*` endpoint then reports the feature unavailable rather than
+    /// half-working.
+    pub llm_enabled: bool,
     pub metrics: Option<Arc<metrics_exporter_prometheus::PrometheusHandle>>,
 }
 

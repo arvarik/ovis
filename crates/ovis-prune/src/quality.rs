@@ -266,7 +266,7 @@ pub fn measure(text: &str) -> QualityMetrics {
         |(bullet, ellipsis, punct, short), line| {
             let is_bullet = line.starts_with(['•', '-', '*', '‣', '◦'])
                 || line.starts_with("· ")
-                || line.starts_with("​•");
+                || line.starts_with("\u{200B}\u{2022}");
             let is_ellipsis = line.ends_with("...") || line.ends_with('…');
             let is_punct = line.ends_with(['.', '!', '?', '"', '”', '’', '।']);
             let is_short = line.chars().count() < 30;

@@ -5,6 +5,7 @@
 //! and how a degraded dependency is reported rather than hidden.
 
 pub mod connectors;
+pub mod llm;
 pub mod pages;
 pub mod prune;
 pub mod prune_reaper;
