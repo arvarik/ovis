@@ -354,6 +354,18 @@ async fn reseed(pool: &sqlx::PgPool) {
 }
 
 fn skip(test: &str) {
+    // See `ovis-core/tests/common`: an unconfigured CI run must fail, not pass
+    // silently, because cargo swallows a passing test's stderr entirely.
+    if std::env::var("OVIS_REQUIRE_TEST_DATABASE")
+        .map(|v| !v.trim().is_empty() && v != "0")
+        .unwrap_or(false)
+    {
+        panic!(
+            "{test} would have skipped, but OVIS_REQUIRE_TEST_DATABASE is set: \
+             no usable OVIS_TEST_DATABASE_URL. A test run that skips itself here \
+             proves nothing, so it fails instead."
+        );
+    }
     eprintln!("SKIPPED {test}: set OVIS_TEST_DATABASE_URL (see `scripts/test-db.sh up`)");
 }
 

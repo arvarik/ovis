@@ -121,11 +121,36 @@ pub async fn seeded() -> Option<TestDb> {
 }
 
 pub fn skip(test: &str) {
+    require_database_or_skip(test);
     eprintln!(
         "SKIPPED {test}: set OVIS_TEST_DATABASE_URL (see `scripts/test-db.sh up`) \
          to run the database integration tests"
     );
 }
+
+/// Refuse to skip when the caller declared a database must be present.
+///
+/// The DB-backed suites skip themselves when `OVIS_TEST_DATABASE_URL` is unset,
+/// so `cargo test` works on a machine without Docker. That is right for a
+/// laptop and dangerous for CI: cargo captures a passing test's stderr, so a
+/// run with no database reports every test "ok" in 0.00 s and prints nothing at
+/// all. Green, and proof of nothing.
+///
+/// `OVIS_REQUIRE_TEST_DATABASE=1` turns that silence into a failure. CI sets
+/// it; nobody else needs to.
+pub fn require_database_or_skip(test: &str) {
+    if std::env::var("OVIS_REQUIRE_TEST_DATABASE")
+        .map(|v| !v.trim().is_empty() && v != "0")
+        .unwrap_or(false)
+    {
+        panic!(
+            "{test} would have skipped, but OVIS_REQUIRE_TEST_DATABASE is set: \
+             no usable OVIS_TEST_DATABASE_URL. A test run that skips itself here \
+             proves nothing, so it fails instead."
+        );
+    }
+}
+
 
 /// Tables the seed owns, in an order that respects the foreign keys.
 const SEEDED_TABLES: [&str; 13] = [

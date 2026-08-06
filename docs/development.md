@@ -100,7 +100,40 @@ cargo deny check                          # advisories, bans, licenses, sources
 cargo audit                               # allowed exceptions documented in .cargo/audit.toml
 ```
 
-There is no CI in this repository yet; these run locally.
+## Continuous integration
+
+`.github/workflows/ci.yml` runs on every push to `main`, every version tag and
+every pull request. Four jobs; the first three run in parallel and the fourth
+waits on all of them:
+
+| Job | What it runs |
+|---|---|
+| `rust` | `cargo clippy --workspace --all-targets -- -D warnings`, then `cargo test --workspace` against a Postgres service container loaded with the captured Onyx schema, `seed.sql` and the support indexes |
+| `ui` | `npm ci`, typecheck, eslint, the design-token check, vitest, `vite build` |
+| `supply chain` | `cargo deny check advisories bans licenses sources` |
+| `publish image` | the GHCR build — **only** after the other three pass, and never for a pull request |
+
+Two things about it are worth knowing.
+
+**The image cannot be published from a red commit.** The publish step is a job
+with `needs`, not a separate workflow. `:latest` is what the homelab's
+watchtower pulls, so a failing test has to be able to stop it.
+
+**CI sets `OVIS_REQUIRE_TEST_DATABASE=1`.** The DB-backed suites skip
+themselves when `OVIS_TEST_DATABASE_URL` is unset — right for a laptop without
+Docker, and dangerous in CI, because cargo captures a passing test's stderr:
+a run with no database reports every test `ok` in 0.00 s and prints nothing at
+all. That variable turns the skip into a failure, so a service container that
+never came up fails the run instead of producing a green tick that proves
+nothing. Set it locally too if you want the same insurance.
+
+`cargo fmt` is deliberately **not** a gate: the tree is not currently
+rustfmt-clean (224 hunks across 44 files, much of it hand-aligned SQL), and
+adopting it is a reformatting commit someone should take on purpose rather
+than a surprise from CI.
+
+Dependency updates arrive as grouped weekly Dependabot PRs, which is only safe
+because those PRs run the pipeline above before anyone reads them.
 
 ## Ground rules
 

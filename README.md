@@ -7,7 +7,7 @@
 *A single-binary observability and control plane for
 [Onyx](https://github.com/onyx-dot-app/onyx) page stores*
 
-[![Docker](https://github.com/arvarik/ovis/actions/workflows/docker.yml/badge.svg)](https://github.com/arvarik/ovis/actions/workflows/docker.yml)
+[![CI](https://github.com/arvarik/ovis/actions/workflows/ci.yml/badge.svg)](https://github.com/arvarik/ovis/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![GHCR](https://img.shields.io/badge/ghcr.io-arvarik%2Fovis-2ea44f?logo=docker&logoColor=white)](https://github.com/arvarik/ovis/pkgs/container/ovis)
 

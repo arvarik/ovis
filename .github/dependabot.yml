@@ -1,0 +1,40 @@
+# Dependency updates, grouped so a week's patches are one reviewable PR rather
+# than thirty.
+#
+# This is only safe because every PR now runs the full pipeline: an update that
+# breaks the delete cascade, the reaper or the UI build fails its own check
+# before anyone looks at it.
+version: 2
+
+updates:
+  - package-ecosystem: cargo
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # Patch and minor bumps are the routine case and travel together.
+      rust-minor:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: 'deps'
+
+  - package-ecosystem: npm
+    directory: /ui
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      ui-minor:
+        update-types: [minor, patch]
+    commit-message:
+      prefix: 'deps(ui)'
+
+  # The workflow's own actions pin to major tags; this is what moves them when
+  # a new major lands, instead of them silently ageing.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    commit-message:
+      prefix: 'ci'

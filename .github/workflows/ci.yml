@@ -1,0 +1,177 @@
+# Everything that must be true before an image is published.
+#
+# One workflow rather than two, because the publish step is a *job* here and
+# can therefore declare `needs`. Previously the image build ran independently
+# of any check, so a red workspace still pushed `:latest` — and the homelab's
+# watchtower pulls `:latest`. Nothing reaches the registry now unless the
+# tests, the lints and the supply-chain audit all passed on that exact commit.
+name: ci
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+# Superseding a pull-request run wastes nothing worth keeping. Superseding a
+# publish leaves a half-pushed image, so main and tags are never cancelled.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    # The DB-backed suites skip themselves when `OVIS_TEST_DATABASE_URL` is
+    # unset — deliberately, so `cargo test` works on a laptop without Docker.
+    # That makes an unconfigured CI *worse than none*: it would report success
+    # while the delete cascade, the reaper and the trash went unexercised. So
+    # CI provisions Postgres and then proves nothing skipped.
+    services:
+      postgres:
+        image: postgres:15-alpine
+        env:
+          POSTGRES_PASSWORD: ovis-test-only
+          POSTGRES_DB: postgres
+        # The same port `scripts/test-db.sh` uses, so the DSN is identical
+        # locally and here.
+        ports: ['55433:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      OVIS_TEST_DATABASE_URL: postgres://postgres:ovis-test-only@127.0.0.1:55433/postgres
+      # Turns "skip because there is no database" into a hard failure. Without
+      # it a run where the service container never came up reports every test
+      # "ok" in 0.00 s — cargo captures a passing test's stderr, so even the
+      # skip notice is invisible. Green, and proof of nothing.
+      OVIS_REQUIRE_TEST_DATABASE: '1'
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+
+      - uses: Swatinem/rust-cache@v2
+
+      # The captured production Onyx schema, not a hand-written approximation:
+      # that is what makes these tests evidence about production.
+      - name: Load the Onyx schema and fixtures
+        shell: bash
+        run: |
+          set -euo pipefail
+          psql "$OVIS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q \
+            -c "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+          psql "$OVIS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f tests/fixtures/onyx_schema.sql
+          psql "$OVIS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f tests/fixtures/seed.sql
+          psql "$OVIS_TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -q -f ops/onyx_indexes.sql
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: test
+        run: cargo test --workspace
+
+  ui:
+    name: ui
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: ui
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+
+      # `ci`, not `install`: the lockfile is the input, and a run that silently
+      # resolved different versions would not be testing what ships.
+      - run: npm ci
+
+      - name: typecheck
+        run: npx tsc -b --noEmit
+
+      - name: lint
+        run: npm run lint
+
+      # Design tokens only — a raw hex or a one-off colour fails the build.
+      - name: tokens
+        run: npm run lint:tokens
+
+      - name: test
+        run: npm test
+
+      - name: build
+        run: npm run build
+
+  supply-chain:
+    name: supply chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
+
+  publish:
+    name: publish image
+    needs: [rust, ui, supply-chain]
+    # A pull request must never publish; everything else may, once green.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # A version tag publishes `1.2.3` and `1.2`; main publishes `latest`.
+          # Note the absence of a `v` — `{{version}}` strips it.
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            OVIS_GIT_SHA=${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
