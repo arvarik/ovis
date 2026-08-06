@@ -4,7 +4,7 @@ use ovis_prune::config::QualityConfig;
 use ovis_prune::quality;
 
 #[derive(serde::Deserialize)]
-struct Doc { id: String, text: String }
+struct Doc { text: String }
 
 fn main() -> anyhow::Result<()> {
     let path = std::env::args().nth(1).unwrap();

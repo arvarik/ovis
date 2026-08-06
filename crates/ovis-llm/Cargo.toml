@@ -1,6 +1,6 @@
 [package]
 name = "ovis-llm"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
 description = "Provider-agnostic LLM access for OVIS: model discovery, capability probing, and constrained scoring"
 publish = false

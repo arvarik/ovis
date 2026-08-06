@@ -7,7 +7,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileDown, FileUp, ListChecks } from 'lucide-react';
-import { pruneConfigQuery, pruneRulesQuery } from '@/api/queries';
+import { pruneConfigQuery, pruneRulesQuery, tagKeysQuery } from '@/api/queries';
 import {
   usePruneConfigImport,
   usePruneRuleCreate,
@@ -25,6 +25,7 @@ import { Input } from '@/components/primitives/Input';
 import { Select } from '@/components/primitives/Select';
 import { Skeleton } from '@/components/primitives/Skeleton';
 import { count as formatCount, relative } from '@/lib/format';
+import { ExclusionsCard } from './ExclusionsCard';
 
 export function RulesTab() {
   const rules = useQuery(pruneRulesQuery);
@@ -121,6 +122,11 @@ export function RulesTab() {
           </ul>
         )}
       </Card>
+
+      {/* Same question as the rules above — "what will a scan flag?" — from the
+          other side, which is where you look when a document is *not* being
+          flagged and you want to know why. */}
+      <ExclusionsCard />
 
       <PreviewDialog
         rule={previewing}
@@ -244,10 +250,15 @@ function CreateRuleDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
           <Input
             value={pattern}
             onChange={(e) => setPattern(e.target.value)}
-            placeholder={String.raw`/(calendar|events)/\d{4}/\d{2}`}
+            placeholder={
+              kind === 'tag_rule'
+                ? String.raw`^section=(archive|legacy)$`
+                : String.raw`/(calendar|events)/\d{4}/\d{2}`
+            }
             className="font-mono"
           />
         </label>
+        {kind === 'tag_rule' ? <TagKeyHints onPick={setPattern} /> : null}
         <label className="block space-y-1 text-label text-ink-mute">
           confidence (0–1]
           <Input value={confidence} onChange={(e) => setConfidence(e.target.value)} inputMode="decimal" />
@@ -274,6 +285,41 @@ function CreateRuleDialog({ open, onOpenChange }: { open: boolean; onOpenChange:
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/**
+ * The tag vocabulary that actually exists in this corpus.
+ *
+ * A tag rule is a regex matched against `key=value`, and writing one blind
+ * meant guessing at keys nobody had listed anywhere — so the commonest outcome
+ * was a rule that previewed to zero and looked broken. The counts matter as
+ * much as the keys: a key with two distinct values is a flag, one with 40,000
+ * is an identifier and a poor thing to pattern-match on.
+ */
+function TagKeyHints({ onPick }: { onPick: (pattern: string) => void }) {
+  const keys = useQuery(tagKeysQuery(40));
+  if (!keys.data || keys.data.length === 0) return null;
+  return (
+    <div className="space-y-1">
+      <span className="text-caption text-ink-mute">
+        Tag keys in this corpus — matched as <code className="font-mono">key=value</code>
+      </span>
+      <div className="flex flex-wrap gap-1.5">
+        {keys.data.map((tag) => (
+          <button
+            key={tag.key}
+            type="button"
+            onClick={() => onPick(`^${tag.key}=`)}
+            className="rounded-full border border-line px-2.5 py-0.5 font-mono text-caption text-ink hover:border-line-2"
+            title={`${formatCount(tag.distinct_values)} distinct value${tag.distinct_values === 1 ? '' : 's'}`}
+          >
+            {tag.key}
+            <span className="ml-1 text-ink-faint">{formatCount(tag.distinct_values)}</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 

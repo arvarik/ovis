@@ -610,7 +610,6 @@ async fn restage_recrawled(state: &AppState, report: &mut CycleReport) -> Result
     if recrawled.is_empty() {
         return Ok(());
     }
-    let expires_at = prune::grace_deadline(state, Utc::now());
 
     for document_id in recrawled {
         let Some(doc) = db::scan_document_row(&state.db, &document_id).await? else {
@@ -648,8 +647,8 @@ async fn restage_recrawled(state: &AppState, report: &mut CycleReport) -> Result
         let Some(row) = db::get_candidate(&state.db, candidate_id).await? else {
             continue;
         };
-        match prune::stage_one(state, &row, expires_at, ACTOR).await {
-            Ok((via, prev_hidden)) => {
+        match prune::stage_one(state, &row, ACTOR).await {
+            Ok((via, prev_hidden, expires_at)) => {
                 // Keep remember set: if this copy is deleted too, the cycle
                 // repeats — visible in the audit trail each time.
                 let _ = db::set_remember(&state.db, candidate_id, true).await;

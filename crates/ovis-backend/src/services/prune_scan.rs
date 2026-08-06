@@ -172,18 +172,12 @@ async fn run_scan(state: &AppState, scan: PruneScanItem) {
     )
     .await;
 
-    let started = Utc::now();
     match execute(state, &scan).await {
         Ok((ScanEnd::Done, mut stats)) => {
-            let close_after = scan.started_at.unwrap_or(started);
-            match db::close_stale_candidates(
-                &state.db,
-                scan.id,
-                &scan.detectors,
-                &scan.scope,
-                close_after,
-            )
-            .await
+            // Scoped by this scan's id, so a resumed scan keeps the candidates
+            // its earlier pass wrote and nothing depends on comparing clocks.
+            match db::close_stale_candidates(&state.db, scan.id, &scan.detectors, &scan.scope)
+                .await
             {
                 Ok(closed) => {
                     stats.candidates_closed = closed.len() as i64;
@@ -679,26 +673,26 @@ async fn execute(
             }
 
             let mut page_hits: Vec<DetectorHit> = Vec::new();
-            let mut group_memberships: Vec<(String, String, i32)> = Vec::new();
+            let mut group_memberships: Vec<profile_db::DupMembership> = Vec::new();
             for (hash, group) in by_hash {
                 if group.len() < 2 {
                     continue;
                 }
                 stats.dup_groups += 1;
+                let cross_connector = spans_connectors(&group);
                 let keeper = select_keeper(&group, ctx.config.dedup.prefer_keep);
                 for member in &group {
                     // The keeper is recorded as a group member too: review
                     // needs to show the whole cluster, and policy excludes
                     // keepers by their role rather than by their absence.
-                    group_memberships.push((
-                        member.id.clone(),
-                        if member.id == keeper.id {
-                            format!("hash-keeper:{hash}")
-                        } else {
-                            format!("hash:{hash}")
-                        },
-                        group.len() as i32,
-                    ));
+                    group_memberships.push(profile_db::DupMembership {
+                        document_id: member.id.clone(),
+                        method: "hash".into(),
+                        group_key: hash.to_string(),
+                        group_size: group.len() as i32,
+                        is_keeper: member.id == keeper.id,
+                        cross_connector,
+                    });
                     if member.id == keeper.id {
                         continue;
                     }
@@ -711,6 +705,16 @@ async fn execute(
                         ctx.config.dedup.prefer_keep,
                     ));
                 }
+            }
+            // Every grouped document needs a profile row or policy cannot see
+            // it; a scan asking only for `exact_duplicate` never runs the walk
+            // that would otherwise have written one.
+            let page_profiles: Vec<DocProfile> = members
+                .iter()
+                .map(|m| grouping_profile(m, &ctx.config_hash))
+                .collect();
+            if let Err(err) = profile_db::upsert_profiles(&state.db, &page_profiles).await {
+                tracing::warn!(error = %err, "writing profiles for grouped documents failed");
             }
             if let Err(err) = profile_db::set_dup_groups(&state.db, &group_memberships).await {
                 tracing::warn!(error = %err, "recording duplicate-group membership failed");
@@ -774,7 +778,7 @@ async fn execute(
                 rows.iter().map(|d| (d.id.as_str(), d)).collect();
 
             let mut page_hits: Vec<DetectorHit> = Vec::new();
-            let mut group_memberships: Vec<(String, String, i32)> = Vec::new();
+            let mut group_memberships: Vec<profile_db::DupMembership> = Vec::new();
             for (key, ids) in &by_key {
                 let members: Vec<&ScanDocRow> =
                     ids.iter().filter_map(|id| by_id.get(id.as_str()).copied()).collect();
@@ -782,17 +786,17 @@ async fn execute(
                     continue;
                 }
                 stats.url_variant_groups += 1;
+                let cross_connector = spans_connectors(&members);
                 let keeper = select_keeper(&members, ctx.config.dedup.prefer_keep);
                 for member in &members {
-                    group_memberships.push((
-                        member.id.clone(),
-                        if member.id == keeper.id {
-                            format!("url-keeper:{key}")
-                        } else {
-                            format!("url:{key}")
-                        },
-                        members.len() as i32,
-                    ));
+                    group_memberships.push(profile_db::DupMembership {
+                        document_id: member.id.clone(),
+                        method: "url".into(),
+                        group_key: key.clone(),
+                        group_size: members.len() as i32,
+                        is_keeper: member.id == keeper.id,
+                        cross_connector,
+                    });
                     if member.id == keeper.id {
                         continue;
                     }
@@ -818,6 +822,13 @@ async fn execute(
                         }],
                     ));
                 }
+            }
+            let page_profiles: Vec<DocProfile> = rows
+                .iter()
+                .map(|d| grouping_profile(d, &ctx.config_hash))
+                .collect();
+            if let Err(err) = profile_db::upsert_profiles(&state.db, &page_profiles).await {
+                tracing::warn!(error = %err, "writing profiles for grouped documents failed");
             }
             if let Err(err) = profile_db::set_dup_groups(&state.db, &group_memberships).await {
                 tracing::warn!(error = %err, "recording URL-variant membership failed");
@@ -931,10 +942,24 @@ fn base_profile(doc: &ScanDocRow, config_hash: &str) -> DocProfile {
         connector_id: doc.connector_id,
         chunk_count: doc.chunk_count,
         content_hash: doc.content_hash.clone(),
-        // Exact-duplicate membership is decided in the hash phase, which knows
-        // the group size; leaving it None here keeps the COALESCE upsert from
-        // erasing what that phase wrote.
+        // Duplicate-group membership lives in `ovis.doc_dup_group`, written by
+        // the two grouping phases; a document can be in one group per method.
         ..DocProfile::default()
+    }
+}
+
+/// The bare profile a grouping phase writes for a document the walk never saw.
+///
+/// Policy evaluates bands over `ovis.doc_profile`, so a document with no row
+/// there is invisible to it however many duplicate groups it belongs to — and
+/// a scan asking only for `exact_duplicate` never runs the document walk. The
+/// fingerprint is deliberately absent: it is the "already measured under this
+/// config" marker, and setting it from a phase that measured almost nothing
+/// would make a later scan skip the content pass it still owes this document.
+fn grouping_profile(doc: &ScanDocRow, config_hash: &str) -> DocProfile {
+    DocProfile {
+        fingerprint: None,
+        ..base_profile(doc, config_hash)
     }
 }
 
@@ -1547,6 +1572,24 @@ fn policy_name(policy: PreferKeepPolicy) -> &'static str {
     }
 }
 
+/// Whether a duplicate group draws its members from more than one connector.
+///
+/// Recorded on every member's profile so policy can hold cross-connector
+/// copies to review without a self-join at read time. A member whose connector
+/// is unknown counts as its own source: "we cannot tell" must not read as
+/// "same connector", because the whole point of the flag is to be cautious.
+fn spans_connectors(group: &[&ScanDocRow]) -> bool {
+    let mut seen: Option<Option<i32>> = None;
+    for member in group {
+        match seen {
+            None => seen = Some(member.connector_id),
+            Some(first) if first == member.connector_id && member.connector_id.is_some() => {}
+            Some(_) => return true,
+        }
+    }
+    false
+}
+
 /// Pick the group member that survives. Content is not fetched for exact
 /// groups (the hash already proves identity), so `longest_content` is served
 /// by chunk count — same ordering, no fetch.
@@ -1682,8 +1725,8 @@ mod tests {
         let a = doc("https://a/a", Some(5), 10);
         let b = doc("https://a/b", Some(5), 10);
         assert_eq!(
-            select_keeper(&vec![&a, &b], PreferKeepPolicy::MostChunks).id,
-            select_keeper(&vec![&b, &a], PreferKeepPolicy::MostChunks).id,
+            select_keeper(&[&a, &b], PreferKeepPolicy::MostChunks).id,
+            select_keeper(&[&b, &a], PreferKeepPolicy::MostChunks).id,
         );
     }
 

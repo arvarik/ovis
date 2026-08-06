@@ -155,6 +155,7 @@ const DDL: &[&str] = &[
         content_hash       text, \
         dup_group          text, \
         dup_group_size     int, \
+        dup_cross_connector boolean, \
         max_jaccard        real, \
         max_jaccard_doc    text, \
         max_cosine         real, \
@@ -166,6 +167,37 @@ const DDL: &[&str] = &[
         distilled_score    real, \
         retrieval_count    int \
     )",
+    // Duplicate-group membership, one row per (document, method).
+    //
+    // This was three columns on `doc_profile`, which gave a document exactly
+    // one group — so the URL-variant phase, running after the exact-duplicate
+    // phase, overwrote the hash membership of every document it also grouped.
+    // A three-document hash cluster came back from the API with one member and
+    // no keeper, and the `exact_duplicate` policy signal stopped matching
+    // documents that were still byte-identical copies. The two detectors
+    // measure different things and a document can legitimately be in both.
+    "CREATE TABLE IF NOT EXISTS ovis.doc_dup_group ( \
+        document_id     text NOT NULL, \
+        method          text NOT NULL, \
+        group_key       text NOT NULL, \
+        group_size      int NOT NULL, \
+        is_keeper       boolean NOT NULL DEFAULT false, \
+        cross_connector boolean NOT NULL DEFAULT false, \
+        computed_at     timestamptz NOT NULL DEFAULT now(), \
+        PRIMARY KEY (document_id, method) \
+    )",
+    "CREATE INDEX IF NOT EXISTS ix_ovis_doc_dup_group_key \
+        ON ovis.doc_dup_group (method, group_key)",
+    // `CREATE TABLE IF NOT EXISTS` is a no-op against a table that already
+    // exists, so a column added to the definition above never reaches a
+    // database created by an earlier build — the query referencing it just
+    // starts failing. Every column added after `doc_profile` first shipped is
+    // therefore also stated as an idempotent ALTER. Both forms are needed: the
+    // CREATE for a fresh database, these for an upgraded one.
+    "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS dup_cross_connector boolean",
+    "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS judge_score real",
+    "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS distilled_score real",
+    "ALTER TABLE ovis.doc_profile ADD COLUMN IF NOT EXISTS retrieval_count int",
     // Every column policy can threshold on gets an index: `/prune/simulate`
     // is a full-corpus aggregate and runs on every drag of the UI slider.
     "CREATE INDEX IF NOT EXISTS ix_ovis_doc_profile_quality \
@@ -837,14 +869,23 @@ pub async fn close_stale_candidates(
     scan_id: i64,
     detectors: &[String],
     scope: &PruneScope,
-    started_at: DateTime<Utc>,
 ) -> CoreResult<Vec<(i64, String)>> {
+    // "This scan did not touch it" is answered by the scan id every upsert
+    // stamps, not by comparing `updated_at` against the scan's start.
+    //
+    // The timestamp form was a race: the two values are written by different
+    // statements, and a re-scan fast enough to land inside the resolution of
+    // the comparison left resolved candidates open — reporting
+    // `candidates_closed: 0` for a document that no longer matched anything.
+    // Reproduced by running this suite under load. Identity does not have that
+    // failure mode at any speed. `IS DISTINCT FROM` so a candidate with no
+    // scan id (opened by hand, or before scans recorded one) still closes.
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
         "UPDATE ovis.prune_candidate pc \
          SET state = 'dismissed', resolved_reason = 'no_longer_matches', updated_at = now() \
-         WHERE pc.state = 'candidate' AND pc.updated_at < ",
+         WHERE pc.state = 'candidate' AND pc.scan_id IS DISTINCT FROM ",
     );
-    qb.push_bind(started_at);
+    qb.push_bind(scan_id);
     // Only candidates whose *every* reason comes from a detector this scan
     // ran: a document flagged by both `thin` (re-scanned, no longer matching)
     // and `language` (not re-scanned) must survive with its language reason.
@@ -870,7 +911,6 @@ pub async fn close_stale_candidates(
         _ => {}
     }
     qb.push(" RETURNING pc.id, pc.document_id");
-    let _ = scan_id; // provenance goes in the caller's audit rows
     let rows = qb.build().fetch_all(pool).await?;
     Ok(rows
         .into_iter()
@@ -895,27 +935,37 @@ fn escape_like(term: &str) -> String {
 
 /// candidate → staged. Returns false when the row was not in `candidate`
 /// (lost race, or already moved) — the caller reports that per-id.
+/// Stage one candidate and start its grace countdown.
+///
+/// The deadline is computed **in the database** rather than passed in from the
+/// application. It is compared against `now()` by the reaper's due filter, and
+/// deriving the two ends of that comparison from two different clocks makes
+/// the grace period wrong by whatever they disagree by. Observed: a container
+/// whose clock ran 23 ms ahead of Postgres wrote every deadline 23 ms into the
+/// database's future, and with `OVIS_PRUNE_GRACE_DAYS=0` — a documented,
+/// supported setting — nothing ever came due.
 pub async fn mark_staged(
     pool: &PgPool,
     id: i64,
     prev_hidden: bool,
-    expires_at: DateTime<Utc>,
+    grace_days: i64,
     staged_by: &str,
-) -> CoreResult<bool> {
-    let updated = sqlx::query(
+) -> CoreResult<Option<DateTime<Utc>>> {
+    let row = sqlx::query(
         "UPDATE ovis.prune_candidate \
          SET state = 'staged', prev_hidden = $2, staged_at = now(), \
-             stage_expires_at = $3, staged_by = $4, updated_at = now() \
-         WHERE id = $1 AND state = 'candidate'",
+             stage_expires_at = now() + make_interval(days => $3), \
+             staged_by = $4, updated_at = now() \
+         WHERE id = $1 AND state = 'candidate' \
+         RETURNING stage_expires_at",
     )
     .bind(id)
     .bind(prev_hidden)
-    .bind(expires_at)
+    .bind(grace_days.clamp(0, 90) as i32)
     .bind(staged_by)
-    .execute(pool)
-    .await?
-    .rows_affected();
-    Ok(updated == 1)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row.map(|r| r.get("stage_expires_at")))
 }
 
 /// staged → restored. The caller un-hides first; this closes the lifecycle.

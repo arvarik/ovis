@@ -148,6 +148,9 @@ GET  /indexing/background-errors
 GET  /indexing/failed-documents
 POST /indexing/targeted-reindex     { cc_pair_id, document_ids? | only_failed? }
 GET  /indexing/targeted-reindex/{job_id}
+GET  /indexing/background-errors    ?cc_pair_id=&limit= — errors the workers recorded
+                                    outside any attempt, so no attempt lists them
+GET  /indexing/failed-documents     Onyx's own view, proxied verbatim
 ```
 
 Attempt items carry derived truth: `stalled` (IN_PROGRESS with no heartbeat
@@ -194,18 +197,99 @@ Contract notes:
   `boost_hidden_via` so a direct-SQL fallback is visible.
 - `chunk_count: null` on a candidate means "not counted yet", never "empty" —
   same as everywhere else.
-- Scan `detectors[]` names what runs; nothing runs unasked. Candidate
-  `detector` filtering uses the *reason* vocabulary (`duplicate`, `thin`,
-  `language`, `url_rule`, `tag_rule`, `stale`, `recrawl`).
+- Scan `detectors[]` names what runs; nothing runs unasked:
+  `exact_duplicate`, `near_duplicate`, `url_variant`, `url_junk`, `thin`,
+  `quality`, `language`, `url_rule`, `tag_rule`, `stale`. Candidate
+  `detector` filtering uses the *reason* vocabulary instead (`duplicate`,
+  `thin`, `quality`, `url_junk`, `language`, `url_rule`, `tag_rule`, `stale`,
+  `recrawl`).
 - `/prune/*` answers `501 NOT_AVAILABLE` when the `ovis.prune_*` tables could
   not be created at startup.
+
+### Measurements and policy
+
+A scan records what it *measured* (`ovis.doc_profile`, `ovis.dup_pair`,
+`ovis.doc_dup_group`); a policy turns measurements into `auto` / `review` /
+untouched bands at read time. That split is what makes a threshold change a
+query rather than a re-scan.
+
+```
+GET  /prune/overview                      the funnel: bundles by reason, by connector,
+                                          corpus totals, trash counts
+GET  /prune/histogram?signal=&buckets=    distribution of one measured column;
+                                          signal ∈ max_jaccard, max_cosine,
+                                          quality_fail_count, word_count, centroid_pct
+POST /prune/simulate                      { tier | policy, sample? } → band counts,
+                                          per-signal and per-connector breakdown,
+                                          random members of each band, caveats
+GET  /prune/policies                      saved threshold sets, active one flagged
+POST /prune/policies/commit               { tier | policy, band, confirm_count, save_as? }
+GET  /prune/clusters?method=&after=&limit= duplicate groups, keeper first;
+                                          method ∈ hash, url; `after` is a key cursor
+GET  /prune/sample?detector=&code=&n=     acceptance-sampling draw + its claim
+POST /prune/narrate                       { subject_kind, method?, limit? } generated titles
+```
+
+- **Simulating mutates nothing** — it is an aggregate over stored
+  measurements, safe on every request.
+- Committing creates *candidates only*. Staging is still a separate confirmed
+  action and deletion still waits out the grace period.
+- `caveats[]` states what the numbers cannot cover — a policy with semantic
+  thresholds and no measured embedding similarity says so rather than
+  reporting a confident zero.
+- `sample` is drawn server-side so a client cannot cherry-pick an easy one,
+  and `statement` carries the confidence bound in words.
+
+### Trash
+
+What the reaper deletes is snapshotted first — Postgres rows, tags, connector
+attribution and every chunk's verbatim `_source` including embedding vectors.
+
+```
+GET    /prune/trash                       connector_id, document_id, hold,
+                                          expiring_within_days, limit, page
+GET    /prune/trash/{id}                  the snapshot: text, chunk previews, provenance
+POST   /prune/trash/restore               { ids|filter, confirm_count?, overwrite? }
+POST   /prune/trash/purge                 { ids|filter, typed_count } — irreversible
+POST   /prune/trash/hold                  { document_ids[], hold } — exempt from auto-purge
+```
+
+- Restore re-inserts the rows and bulk-indexes the chunks under their original
+  ids, so a restored document is semantically searchable immediately.
+  `reappeared: true` means the crawler brought the id back; restoring then
+  requires `overwrite`.
+- **Purge demands `typed_count` at every size**, not just past the bulk
+  threshold, and skips held snapshots. There is deliberately no "empty trash".
+
+## LLM providers
+
+Optional. Nothing in pruning requires a model; this adds relevance judging and
+the generated titles on cluster and bundle cards.
+
+```
+GET/POST /llm/providers                   connect an endpoint (llamacpp, ollama,
+                                          openai_compatible, gemini, anthropic)
+DELETE   /llm/providers/{id}
+POST     /llm/providers/{id}/discover     re-read the catalogue, keeping role assignments
+POST     /llm/providers/{id}/probe        probe every model this provider serves
+GET      /llm/models                      ?provider_id=
+POST     /llm/models/{provider_id}/probe  { model_id } → measured capabilities
+GET/PUT  /llm/roles                       assign bulk / quality / narrate
+```
+
+A provider's own listing says a model *exists*; only a probe says whether its
+output constraints actually hold. A model that has not passed one cannot be
+given a role — the server refuses, it is not merely hidden in the UI.
 
 ## Tags, stats, system
 
 ```
 GET /tags?key=&limit=               facet counts (cached 60 s)
+GET /tags/keys?limit=               tag keys with their distinct-value counts
 GET /stats/overview                 documents, chunks, connector counts, index+disk,
                                     embedding info, crawl rates, attempt outcomes
+GET /stats/index                    index size/docs/disk/read-only only — the cheap
+                                    health probe: OpenSearch alone, no Postgres
 GET /stats/timeline?window=24h|7d|30d&bucket=1h|1d
 GET /stats/sources                  per-source docs/chunks/connector counts
 GET /stats/connectors/top?by=docs|recent&limit=
@@ -215,6 +299,11 @@ GET /system/runtime                 index name, embedding model/dim, query prefi
 GET /system/version                 version, git sha, rustc, built-at, profile
 GET /system/metrics                 Prometheus text
 ```
+
+`/stats/index` is the same object `/stats/overview` nests under `index`, but
+reached without the six Postgres aggregates the overview also runs — the
+endpoint to poll from a monitor that only wants disk headroom and the
+read-only alarm.
 
 The Onyx version lives on `/system/health` (`onyx_api.version`), **not** on
 `/system/runtime`.

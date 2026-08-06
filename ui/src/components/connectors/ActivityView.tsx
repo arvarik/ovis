@@ -2,9 +2,9 @@ import { useState } from 'react';
 import { useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
 import { Pause, Play } from 'lucide-react';
-import { indexingAttemptsQuery, overviewQuery } from '@/api/queries';
+import { backgroundErrorsQuery, indexingAttemptsQuery, overviewQuery } from '@/api/queries';
 import { cn } from '@/lib/cn';
-import { count as formatCount } from '@/lib/format';
+import { count as formatCount, relative } from '@/lib/format';
 import { Button } from '@/components/primitives/Button';
 import { EmptyState, ErrorState } from '@/components/primitives/EmptyState';
 import { Skeleton } from '@/components/primitives/Skeleton';
@@ -79,6 +79,8 @@ export function ActivityView() {
           )}
         </section>
 
+        <BackgroundErrors autoRefresh={autoRefresh} />
+
         <section aria-label="Recent attempts" className="space-y-2.5">
           <div className="flex flex-wrap items-center gap-2">
             <h2 className="text-label font-medium text-ink-faint">Recent</h2>
@@ -123,5 +125,47 @@ export function ActivityView() {
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Errors the indexing workers recorded outside any single attempt.
+ *
+ * Onyx keeps these in their own table precisely because they do not belong to
+ * an attempt — a Celery task that died, a connector that threw before it could
+ * open one. Nothing in the attempt list will ever mention them, so a run can
+ * look clean while these pile up underneath it. Silent by default: the section
+ * only appears when there is something to say.
+ */
+function BackgroundErrors({ autoRefresh }: { autoRefresh: boolean }) {
+  const errors = useQuery({
+    ...backgroundErrorsQuery(undefined, 25),
+    refetchInterval: autoRefresh ? 30_000 : false,
+  });
+
+  if (errors.isPending || errors.isError || (errors.data?.length ?? 0) === 0) return null;
+
+  return (
+    <section aria-label="Background errors" className="space-y-2.5">
+      <h2 className="text-label font-medium text-ink-faint">
+        Background errors
+        <span className="ml-2 text-ink-mute">{formatCount(errors.data.length)}</span>
+      </h2>
+      <p className="text-caption text-ink-mute">
+        Recorded by the indexing workers outside any one attempt, so they never appear on an
+        attempt&rsquo;s own error list.
+      </p>
+      <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
+        {errors.data.map((error) => (
+          <li key={error.id} className="px-4 py-2.5">
+            <p className="text-body text-ink">{error.message}</p>
+            <p className="mt-0.5 text-caption text-ink-faint">
+              {relative(error.time_created)}
+              {error.cc_pair_id !== null ? ` · cc-pair ${error.cc_pair_id}` : ''}
+            </p>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }

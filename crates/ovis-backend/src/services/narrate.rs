@@ -270,22 +270,37 @@ pub async fn narrate(
 }
 
 /// The newest annotation for each of `keys`.
+///
+/// **Infallible by design.** A generated title is decoration hung on a review
+/// screen; the screen's own numbers do not depend on it. So this returns
+/// nothing rather than an error when the annotation table cannot be read —
+/// absent (a deployment that never configured a model), not yet created (an
+/// older instance sharing the database mid-upgrade, exactly as scans handle
+/// that case), or unreadable for any other reason. Propagating that error
+/// would take down Triage and Clusters for a feature neither surface needs,
+/// which is the opposite of degrading to today's behaviour.
 pub async fn newest_for(
     state: &AppState,
     subject_kind: &str,
     keys: &[String],
-) -> Result<Vec<NarrationView>, AppError> {
+) -> Vec<NarrationView> {
     // Deliberately not behind `guard`: the read path has to work when the LLM
     // tables are absent, returning nothing, so a cluster list still renders on
     // a deployment that never configured a model.
     if !state.llm_enabled {
-        return Ok(Vec::new());
+        return Vec::new();
     }
-    Ok(db::newest_for(&state.db, subject_kind, keys)
-        .await?
-        .into_iter()
-        .map(Into::into)
-        .collect())
+    match db::newest_for(&state.db, subject_kind, keys).await {
+        Ok(rows) => rows.into_iter().map(Into::into).collect(),
+        Err(err) => {
+            tracing::warn!(
+                subject_kind,
+                error = %err,
+                "could not read generated titles; showing the mechanical descriptions instead"
+            );
+            Vec::new()
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------

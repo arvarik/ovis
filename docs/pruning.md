@@ -112,9 +112,11 @@ time.
 
 A scan writes an `ovis.doc_profile` row for **every** document it examines,
 flagged or not: word counts, which quality gates failed, canonical URL, URL
-class, duplicate-group membership, strongest measured similarity. Verified
-duplicate pairs go to `ovis.dup_pair` with their similarity, including pairs
-below the acting threshold.
+class, strongest measured similarity. Verified duplicate pairs go to
+`ovis.dup_pair` with their similarity, including pairs below the acting
+threshold. Duplicate-group membership lives in `ovis.doc_dup_group`, one row
+per `(document, method)` — a page can be both a content duplicate and a URL
+variant, and each group keeps its own keeper.
 
 That is what makes thresholds a review-time decision. `POST /prune/simulate`
 evaluates a policy against the stored profiles and reports what it *would*
@@ -125,6 +127,44 @@ re-scan of 1.7 M documents.
 Simulation also reports what it cannot see. If no document has an embedding
 similarity yet, a policy with semantic thresholds says so rather than
 reporting a confident zero.
+
+A policy's `cross_connector_review_only` (on in every shipped preset) keeps
+duplicates whose group spans connectors out of the bulk band — they still
+surface for review, they just stop being something automation stages. FineWeb's
+finding is that global dedup over-prunes: a page mirrored across sources is
+usually popular rather than redundant. The scan records the connector spread as
+it builds the group, so the rule costs nothing at review time, and a group whose
+connector cannot be determined counts as spanning.
+
+A policy has three shipped presets (`conservative`, `standard`, `aggressive`),
+but every signal is editable and any policy can be saved under a name and made
+the deployment's active one. `POST /prune/policies/commit` turns a band into
+candidates — review rows and nothing more. Staging is still a separate confirmed
+action, and deletion still waits out the grace period; committing a policy is
+the *cheapest* thing in the lifecycle, not a shortcut past it.
+
+## Reviewing at scale
+
+207,230 candidates is not a list anyone works through. The review surfaces
+therefore make the *group* the unit of decision, not the row:
+
+- **The funnel** (`/prune/overview`) reports the backlog as bundles by reason
+  and by connector, each with its document count, the chunks it holds — the
+  index weight deleting it actually reclaims — and how many sit on a
+  still-crawling connector.
+- **Threshold review.** `/prune/histogram` returns the measured distribution of
+  any signal a policy can threshold on, so a number is chosen against what the
+  corpus actually looks like rather than by feel.
+- **Acceptance sampling** (`/prune/sample`) draws a random subset server-side —
+  so a client cannot pick an easy one — and states the claim accepting it would
+  support: with zero mistakes in `n` independent draws, the true error rate is
+  below `1 - (1 - c)^(1/n)` at confidence `c`. The sentence travels with the
+  numbers, because the decision it feeds is a human's.
+- **Cluster review** (`/prune/clusters`) returns whole duplicate groups, keeper
+  first, with the rule that chose the keeper. 49,683 hash groups is a reviewable
+  number of decisions; the 184,058 candidates inside them are not.
+
+All of this is read-only. Nothing on this path hides or deletes anything.
 
 ## The reaper
 

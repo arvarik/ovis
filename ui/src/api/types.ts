@@ -554,6 +554,7 @@ export interface PruneScope {
 }
 
 /** Scan-launch detector names (distinct from the reason vocabulary). */
+/** Mirrors `services::prune::KNOWN_DETECTORS`. */
 export type PruneScanDetector =
   | 'exact_duplicate'
   | 'near_duplicate'
@@ -561,7 +562,10 @@ export type PruneScanDetector =
   | 'url_rule'
   | 'tag_rule'
   | 'thin'
-  | 'stale';
+  | 'stale'
+  | 'quality'
+  | 'url_junk'
+  | 'url_variant';
 
 export interface PruneScanRequest {
   scope: PruneScope;
@@ -993,3 +997,40 @@ export interface LlmRoleAssignment {
 }
 
 export type LlmRoles = Record<LlmRole, LlmRoleAssignment | null>;
+
+/**
+ * A saved threshold set. `active` marks the deployment's standing answer to
+ * "what counts as prunable here".
+ */
+export interface PruneStoredPolicy {
+  id: number;
+  name: string;
+  tier: string;
+  body: PrunePolicy;
+  config_hash: string;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * An acceptance-sampling draw and the claim accepting it would support.
+ *
+ * `statement` is the server's own words: the arithmetic is a confidence bound,
+ * and the decision it feeds is a human's, so the sentence travels with the
+ * numbers rather than being rebuilt in the client.
+ */
+export interface PruneSamplePlan {
+  population: number;
+  sample_size: number;
+  max_failures: number;
+  confidence: number;
+  max_error_rate: number;
+  statement: string;
+  documents: PruneSampleDoc[];
+}
+
+export interface TagKeyItem {
+  key: string;
+  distinct_values: number;
+}

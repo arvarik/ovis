@@ -180,10 +180,12 @@ pub async fn capture(
 
     let mut chunks: Vec<Value> = Vec::new();
     let mut after: Option<i64> = None;
+    let mut expected: Option<i64> = None;
     loop {
-        let (items, _total, next) = os
+        let (items, total, next) = os
             .document_chunks_raw(index, document_id, after, 200)
             .await?;
+        expected.get_or_insert(total);
         if items.is_empty() {
             break;
         }
@@ -202,6 +204,21 @@ pub async fn capture(
             Some(n) => after = Some(n),
             None => break,
         }
+    }
+
+    // Paging stops on the first page that cannot produce a cursor, which is
+    // normally the last one — but a chunk missing the sort field ends it early
+    // too, and a snapshot short of a chunk looks exactly like a complete one.
+    // Deletion is irreversible past the trash, so a short read is refused
+    // rather than trusted. Losing a delete cycle is recoverable; losing a
+    // chunk is not.
+    let expected = expected.unwrap_or(0);
+    if (chunks.len() as i64) < expected {
+        return Err(CoreError::search(format!(
+            "snapshot for {document_id} read {} of {expected} chunks; refusing to delete a \
+             document it cannot fully capture",
+            chunks.len()
+        )));
     }
 
     Ok(Snapshot {

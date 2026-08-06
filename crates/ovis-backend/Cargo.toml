@@ -1,6 +1,6 @@
 [package]
 name = "ovis-backend"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
 description = "Axum REST & SSE API server for OVIS"
 publish = false

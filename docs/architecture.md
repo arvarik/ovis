@@ -49,9 +49,15 @@ Responsibilities are split by what each store is good at:
 | `ovis-core` | The data plane: Postgres queries, the OpenSearch client, the Onyx API client, and `api_types` — the wire structs shared with the CLI |
 | `ovis-backend` | Axum HTTP/SSE server, background tasks, and the embedded UI (`rust-embed`) |
 | `ovis-cli` | `ovis` — CLI + ratatui TUI; an API client holding no credentials |
+| `ovis-prune` | The detection engine: published text-quality gates, MinHash/LSH near-duplicate signatures, URL canonicalisation and asset classification. Pure functions over text and URLs — no I/O, no database |
+| `ovis-llm` | Provider-agnostic model access (llama.cpp, Ollama, OpenAI-compatible, Gemini, Anthropic) and the capability probe that decides whether a model may be given work |
 | `ovis-bench` | The performance acceptance gate |
-| `ovis-prune` | Deduplication/pruning engine — its rework is deferred; nothing depends on it |
 | `ui/` | React 19 + TypeScript + Tailwind v4, compiled by Vite, embedded at build time |
+
+`ovis-prune` is deliberately I/O-free: it decides *what a piece of text or a
+URL is*, and the backend decides what to do about it. That is what lets the
+detection thresholds be unit-tested against fixtures and swept offline
+(`cargo run -p ovis-prune --example gate_sweep`) without a database in sight.
 
 ## Design principles (the ones that shape behaviour)
 

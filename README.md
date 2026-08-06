@@ -41,12 +41,29 @@ one Rust binary.
 - 📈 **Live crawl telemetry.** Running attempts with heartbeats, pages/min and
   batch progress; *queued* is labeled queued, and *stalled* means no heartbeat
   for 45 minutes — never guessed from document counts.
-- ✂️ **Review-first pruning.** Checkpointed scans find duplicates (exact +
-  MinHash), stubs, foreign-language and rule-matched junk — as *candidates*
-  with per-document evidence, never as deletions. Acting means staging
-  (reversible `hidden`, Onyx-synced); only a rate-limited background reaper
-  ever deletes, after a grace period, and recrawled documents are auto-staged
-  again rather than silently returning. See [docs/pruning.md](docs/pruning.md).
+- ✂️ **Review-first pruning, at corpus scale.** Checkpointed scans find
+  duplicates (exact, MinHash and canonical-URL), stubs, assets indexed as
+  pages, low-quality text and rule-matched junk — as *candidates* with
+  per-document evidence, never as deletions. Acting means staging (reversible
+  `hidden`, Onyx-synced); only a rate-limited background reaper ever deletes,
+  after a grace period, and recrawled documents are auto-staged again rather
+  than silently returning. See [docs/pruning.md](docs/pruning.md).
+- 🎚️ **Thresholds you can see before you commit.** A scan records
+  *measurements*, not verdicts, so moving a threshold costs one query instead
+  of a re-scan of 1.7M documents. Edit any signal against its measured
+  distribution, simulate what it would flag — a real aggregate, not an
+  estimate — check a statistically drawn sample, then commit. Simulating
+  changes nothing, and the result says plainly what it cannot see.
+- 🗑️ **Deletion you can undo.** What the reaper deletes is snapshotted first —
+  rows, tags, attribution and every chunk including its embedding vectors — so
+  a restore puts the document back searchable *immediately*, with no re-crawl
+  and no re-embed. Onyx cannot see any of it. Purging the snapshot is the one
+  genuinely irreversible act in the product, and it asks for the count typed
+  back at any size.
+- 🤖 **Optional local LLM assist.** Point OVIS at llama.cpp, Ollama, an
+  OpenAI-compatible endpoint or a hosted API; it probes each model to find
+  which output constraints actually hold, and only models that pass get work.
+  Nothing in pruning requires one.
 - 🧭 **One data plane.** Only the backend holds credentials. The web UI, the
   CLI, and your scripts all speak the same typed HTTP API — the CLI compiles
   against the very structs the server serialises.
@@ -77,9 +94,11 @@ one Rust binary.
 
 ## The CLI
 
-Everything the dashboard does, scriptable. `@N` handles make the
-list → inspect → act loop effortless, stdout is always clean data, and exit
-codes mean things.
+The corpus, the fleet and the pruning lifecycle, scriptable. `@N` handles make
+the list → inspect → act loop effortless, stdout is always clean data, and exit
+codes mean things. (The review-at-scale surfaces — policy simulation, cluster
+review and the trash — are web UI and HTTP API today; the CLI covers scanning,
+staging, restoring and the audit trail.)
 
 ```console
 $ ovis status
@@ -151,8 +170,9 @@ the free-tier PAT fallback for Onyx's paywalled API keys — is in
 | 🚀 [Getting started](docs/getting-started.md) | Install, configure, the index migration, the Onyx token |
 | 🏛️ [Architecture](docs/architecture.md) | One data plane, the crates, the honesty principles |
 | 🔌 [HTTP API](docs/api.md) | Every endpoint, pagination, SSE, errors, the honest fields |
+| ✂️ [Pruning](docs/pruning.md) | Detectors, measurements and policy, the staged/grace/reaper lifecycle, the trash |
 | ⌨️ [CLI](docs/cli.md) | Commands, `@N` handles, formats, exit codes, the TUI |
-| 🖥️ [Web UI](docs/web-ui.md) | The five views, keyboard shortcuts, mobile |
+| 🖥️ [Web UI](docs/web-ui.md) | The seven views, keyboard shortcuts, mobile |
 | 🔧 [Operations](docs/operations.md) | Production settings, health, metrics, security, day-2 |
 | 🩺 [Troubleshooting](docs/troubleshooting.md) | Symptom → cause → fix |
 | 🛠️ [Development](docs/development.md) | Building, the test pyramid, UI workflow, quality gates |
@@ -163,8 +183,11 @@ the free-tier PAT fallback for Onyx's paywalled API keys — is in
 crates/ovis-core       data plane: queries, clients, shared wire types
 crates/ovis-backend    Axum HTTP/SSE server + embedded UI
 crates/ovis-cli        `ovis` — CLI + TUI (pure API client)
+crates/ovis-prune      detection: quality gates, MinHash dedup, URL canonicalisation
+crates/ovis-llm        provider-agnostic model access and capability probing
 crates/ovis-bench      the performance gate
 ui/                    React 19 + Tailwind v4 dashboard
+ops/                   the index migration
 docs/                  the guides above
 ```
 

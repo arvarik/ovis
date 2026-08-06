@@ -9,7 +9,7 @@
  * Keyboard-first, because the whole point is doing this many times in a row:
  * j/k move between clusters, a stages the non-keepers, s skips.
  */
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { pruneClustersQuery } from '@/api/queries';
 import { usePruneStage } from '@/api/mutations';
@@ -25,13 +25,43 @@ import { NarrateButton } from '@/components/prune/NarrateButton';
 import { NarrationNote } from '@/components/prune/NarrationNote';
 import { count as formatCount } from '@/lib/format';
 
+/**
+ * The copies this cluster can actually stage.
+ *
+ * A cluster is built from the *measurements* a scan recorded, so a member only
+ * has a candidate row if a detector or a policy flagged it — dismiss one, or
+ * browse clusters before committing a policy, and some copies have nothing to
+ * act on. Staging is driven by candidate ids, so this is the number the button
+ * has to be labelled and disabled by; counting all the non-keepers made it
+ * promise more than it did, and promise something when it could do nothing.
+ */
+function stageableIds(cluster: PruneCluster): number[] {
+  return cluster.members
+    .filter((m) => !m.is_keeper && m.candidate_id !== null)
+    .map((m) => m.candidate_id as number);
+}
+
+const PAGE_SIZE = 25;
+
 export function ClustersTab() {
   const [method, setMethod] = useState('hash');
   const [index, setIndex] = useState(0);
-  const clusters = useQuery(pruneClustersQuery(method, 25));
+  /**
+   * Keys already paged past, newest last. The server pages clusters by key
+   * cursor, so walking back is a matter of popping this rather than asking for
+   * a page number the API does not have.
+   */
+  const [cursors, setCursors] = useState<string[]>([]);
+  const after = cursors.at(-1);
+  const clusters = useQuery(pruneClustersQuery(method, PAGE_SIZE, after));
   const stage = usePruneStage();
 
-  const items = clusters.data?.items ?? [];
+  // Memoised because `nextPage` closes over it: a fresh `[]` on every render
+  // would rebuild the callback, and with it the keydown listener, every time.
+  const items = useMemo(() => clusters.data?.items ?? [], [clusters.data]);
+  // A full page means there is very likely another; the API returns clusters,
+  // not a total, so this is the honest signal available.
+  const mayHaveMore = items.length === PAGE_SIZE;
   // Clamped at render rather than corrected in an effect: staging a cluster
   // shortens the list, and writing the correction back as state would cost a
   // second render for no gain.
@@ -40,14 +70,28 @@ export function ClustersTab() {
 
   const stageCluster = useCallback(
     (cluster: PruneCluster) => {
-      const ids = cluster.members
-        .filter((m) => !m.is_keeper && m.candidate_id !== null)
-        .map((m) => m.candidate_id as number);
+      const ids = stageableIds(cluster);
       if (ids.length === 0) return;
       stage.mutate({ ids, confirm_count: ids.length }, { onSuccess: () => setIndex((i) => i + 1) });
     },
     [stage],
   );
+
+  // Paging is part of the review flow, not a separate act: running off the end
+  // of a page with `j` fetches the next one, because the alternative is
+  // reviewing 25 clusters and quietly stopping.
+  const nextPage = useCallback(() => {
+    const last = items.at(-1);
+    if (!mayHaveMore || !last) return;
+    setCursors((prev) => [...prev, last.key]);
+    setIndex(0);
+  }, [items, mayHaveMore]);
+
+  const prevPage = useCallback(() => {
+    if (cursors.length === 0) return;
+    setCursors((prev) => prev.slice(0, -1));
+    setIndex(PAGE_SIZE); // clamped to the last cluster of that page at render
+  }, [cursors.length]);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -55,14 +99,18 @@ export function ClustersTab() {
         return;
       }
       if (event.key === 'j' || event.key === 's') {
-        setIndex((i) => Math.min(i + 1, items.length - 1));
+        if (index >= items.length - 1) nextPage();
+        else setIndex((i) => Math.min(i + 1, items.length - 1));
       }
-      if (event.key === 'k') setIndex((i) => Math.max(i - 1, 0));
+      if (event.key === 'k') {
+        if (index === 0) prevPage();
+        else setIndex((i) => Math.max(i - 1, 0));
+      }
       if (event.key === 'a' && current) stageCluster(current);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [current, items.length, stageCluster]);
+  }, [current, index, items.length, nextPage, prevPage, stageCluster]);
 
   if (clusters.isPending) return <Skeleton className="h-64 w-full" />;
   if (clusters.isError) {
@@ -83,6 +131,7 @@ export function ClustersTab() {
             onValueChange={(next) => {
               setMethod(next);
               setIndex(0);
+              setCursors([]);
             }}
             ariaLabel="Group duplicates by"
             options={[
@@ -108,18 +157,46 @@ export function ClustersTab() {
         />
       ) : current ? (
         <>
-          <div className="flex items-center justify-between text-label text-ink-mute">
+          <div className="flex flex-wrap items-center justify-between gap-2 text-label text-ink-mute">
             <span>
               Cluster {safeIndex + 1} of {items.length}
+              {cursors.length > 0 ? ` · page ${cursors.length + 1}` : ''}
             </span>
             <span>{formatCount(current.size)} documents in this group</span>
           </div>
           <ClusterCard
             cluster={current}
             onStage={() => stageCluster(current)}
-            onSkip={() => setIndex((i) => Math.min(i + 1, items.length - 1))}
+            onSkip={() =>
+              safeIndex >= items.length - 1
+                ? nextPage()
+                : setIndex((i) => Math.min(i + 1, items.length - 1))
+            }
             staging={stage.isPending}
           />
+          <div className="flex items-center justify-between">
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={cursors.length === 0 || clusters.isFetching}
+              onClick={prevPage}
+            >
+              Previous page
+            </Button>
+            <span className="text-caption text-ink-mute">
+              {/* Clusters are keyed, not numbered — the server pages by cursor,
+                  so a total would be a second full aggregate for a line of text. */}
+              {mayHaveMore ? 'more groups after these' : 'last page'}
+            </span>
+            <Button
+              size="sm"
+              variant="secondary"
+              disabled={!mayHaveMore || clusters.isFetching}
+              onClick={nextPage}
+            >
+              Next page
+            </Button>
+          </div>
         </>
       ) : null}
     </div>
@@ -139,6 +216,8 @@ function ClusterCard({
 }) {
   const keeper = cluster.members.find((m) => m.is_keeper);
   const copies = cluster.members.filter((m) => !m.is_keeper);
+  const stageable = stageableIds(cluster).length;
+  const unflagged = copies.length - stageable;
 
   return (
     <Card className="space-y-4 p-4">
@@ -180,25 +259,40 @@ function ClusterCard({
 
       <div>
         <div className="text-label text-ink-mute">
-          {formatCount(copies.length)} cop{copies.length === 1 ? 'y' : 'ies'} to stage
+          {formatCount(copies.length)} cop{copies.length === 1 ? 'y' : 'ies'} beside the keeper
         </div>
+        {/* Which copies are actionable is not obvious from looking at them, and
+            a button that quietly stages a subset is worse than one that says
+            so up front. */}
+        {unflagged > 0 ? (
+          <p className="mt-1 text-caption text-gold">
+            {formatCount(unflagged)} of these {unflagged === 1 ? 'is' : 'are'} not flagged —
+            dismissed, or not covered by a scan or committed policy yet — so staging leaves{' '}
+            {unflagged === 1 ? 'it' : 'them'} alone.
+          </p>
+        ) : null}
         <ul className="mt-2 space-y-2">
           {copies.map((member) => (
             <li key={member.document_id} className="rounded-md border border-line p-3">
               <div className="break-all text-ink">{member.link ?? member.document_id}</div>
               <MemberMeta member={member} keeper={keeper} />
+              {member.candidate_id === null ? (
+                <div className="mt-1 text-caption text-gold">not flagged — will not be staged</div>
+              ) : null}
             </li>
           ))}
         </ul>
       </div>
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
-        <Button onClick={onStage} disabled={staging || copies.length === 0}>
+        <Button onClick={onStage} disabled={staging || stageable === 0}>
           {staging
             ? 'Staging…'
-            : keeper
-              ? `Stage ${formatCount(copies.length)} and keep 1`
-              : `Stage ${formatCount(copies.length)}`}
+            : stageable === 0
+              ? 'Nothing to stage here'
+              : keeper
+                ? `Stage ${formatCount(stageable)} and keep 1`
+                : `Stage ${formatCount(stageable)}`}
         </Button>
         <Button variant="secondary" onClick={onSkip}>
           Skip

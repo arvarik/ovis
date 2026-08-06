@@ -2140,7 +2140,7 @@ checksum = "04744f49eae99ab78e0d5c0b603ab218f515ea8cfe5a456d7629ad883a3b6e7d"
 
 [[package]]
 name = "ovis-backend"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2177,7 +2177,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-bench"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "reqwest",
@@ -2188,7 +2188,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-cli"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "anstream 0.6.21",
  "anstyle",
@@ -2227,7 +2227,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-core"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "base64",
  "chrono",
@@ -2246,7 +2246,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-llm"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "chrono",
  "ovis-core",
@@ -2261,7 +2261,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-prune"
-version = "0.3.0"
+version = "1.0.0"
 dependencies = [
  "anyhow",
  "chrono",

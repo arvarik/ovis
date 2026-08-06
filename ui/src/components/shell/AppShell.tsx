@@ -65,6 +65,20 @@ export function AppShell() {
       group: 'Navigation',
       handler: () => navigate({ to: '/stats' }),
     },
+    // The rail has six destinations; the keyboard reached four of them.
+    {
+      keys: 'g r',
+      description: 'Go to Prune',
+      group: 'Navigation',
+      // Triage is the landing tab, as it is for a direct visit.
+      handler: () => navigate({ to: '/prune', search: { tab: 'triage' } }),
+    },
+    {
+      keys: 'g m',
+      description: 'Go to Models',
+      group: 'Navigation',
+      handler: () => navigate({ to: '/models' }),
+    },
     {
       keys: 'r',
       description: 'Refresh data',

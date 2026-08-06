@@ -146,6 +146,51 @@ database (the `ovis` schema is the only DDL OVIS runs) and restart.
 `ix_ovis_document_content_hash` index from `ops/onyx_indexes.sql`; without it
 each group page re-sorts the whole table.
 
+**The reaper says `halted: trash_unavailable`** — `ovis.trash_document` could
+not be created, so there is nowhere to put a snapshot. The reaper refuses to
+fall back to irreversible deletion. Same fix as the 501 above: grant `CREATE`
+and restart.
+
+**The reaper says `halted: index_status_unknown`** — OpenSearch could not be
+reached to check whether the index is writable. Cannot-verify is treated as
+do-not-delete; the reaper resumes by itself once the index answers.
+
+**A simulation reports zero for a threshold I know matches** — read the
+`caveats`. A semantic or near-duplicate threshold contributes nothing until a
+scan has actually measured that signal; the Triage summary shows how many
+documents have a profile and how many verified pairs exist. Unmeasured is not
+the same as zero, and the simulation says which it is.
+
+**Restore refused with a conflict** — the crawler brought the document id back
+while the snapshot sat in the trash. Restoring would collide with a live
+document, so it is refused unless you pass `overwrite` (the Trash tab badges
+these rows and switches the button).
+
+**Purge reported fewer destroyed than selected** — held snapshots are skipped
+at any size. Release the hold first if you really mean to destroy them.
+
+**The trash is using more disk than expected** — snapshots keep embedding
+vectors by default so a restored document is searchable immediately (~15 kB per
+document against ~5 kB without). Set `OVIS_TRASH_KEEP_VECTORS=false`, or shorten
+`OVIS_TRASH_RETENTION_DAYS`. Restored snapshots are retained as an audit record
+and are not purged automatically.
+
+## Models
+
+**A model will not accept a role** — only models that have *passed a probe* can
+be given work, and the server enforces it rather than the UI merely hiding the
+option. Probe it; if enum and schema enforcement both fail, that endpoint cannot
+be constrained to structured output and is not usable as a judge.
+
+**Models the endpoint serves are missing from the list** — a catalogue changes
+under a stable endpoint (an `ollama pull`, a hosted provider retiring a model).
+Use **Refresh models** on the provider card, which re-reads it while keeping
+role assignments; deleting and re-adding the provider throws them away.
+
+**Cluster and bundle cards show no generated titles** — narration is optional.
+With no model assigned to the `narrate` role, every card keeps the mechanical
+description it always had; that is the designed behaviour, not a failure.
+
 ## Client-side oddities
 
 | Symptom | Meaning |

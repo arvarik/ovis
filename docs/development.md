@@ -7,8 +7,9 @@ crates/
 ├── ovis-core/       data plane: db queries, OpenSearch + Onyx clients, api_types (the wire contract)
 ├── ovis-backend/    Axum server, SSE, background tasks, embedded UI (assets.rs)
 ├── ovis-cli/        the `ovis` binary — CLI + TUI, pure API client
-├── ovis-bench/      performance acceptance gates
-└── ovis-prune/      dedup/prune engine (its rework is deferred; nothing depends on it)
+├── ovis-prune/      detection: quality gates, MinHash dedup, URL canonicalisation (no I/O)
+├── ovis-llm/        provider-agnostic model access + the capability probe
+└── ovis-bench/      performance acceptance gates
 ui/                  React 19 + TS + Tailwind v4 (see ui/README.md)
 docs/                this documentation
 ops/                 onyx_indexes.sql — the Postgres support indexes
@@ -94,7 +95,7 @@ primitive in both viewport classes.
 ## Quality gates
 
 ```bash
-cargo clippy --workspace --all-targets    # clean (ovis-prune excepted, untouched)
+cargo clippy --workspace --all-targets    # clean: zero warnings across the workspace
 cargo deny check                          # advisories, bans, licenses, sources
 cargo audit                               # allowed exceptions documented in .cargo/audit.toml
 ```

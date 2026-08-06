@@ -300,7 +300,7 @@ pub async fn overview(State(state): State<AppState>) -> Result<Response, AppErro
     attach_narrations(&state, "bundle", &mut overview.bundles, |b| &b.key, |b, n| {
         b.narration = Some(n)
     })
-    .await?;
+    .await;
     Ok(axum::Json(overview).into_response())
 }
 
@@ -316,11 +316,11 @@ async fn attach_narrations<T>(
     items: &mut [T],
     key: impl Fn(&T) -> &String,
     set: impl Fn(&mut T, narrate::NarrationView),
-) -> Result<(), AppError> {
+) {
     let keys: Vec<String> = items.iter().map(|i| key(i).clone()).collect();
-    let found = narrate::newest_for(state, subject_kind, &keys).await?;
+    let found = narrate::newest_for(state, subject_kind, &keys).await;
     if found.is_empty() {
-        return Ok(());
+        return;
     }
     let by_key: std::collections::HashMap<&str, &narrate::NarrationView> = found
         .iter()
@@ -331,7 +331,6 @@ async fn attach_narrations<T>(
             set(item, found);
         }
     }
-    Ok(())
 }
 
 /// Generate titles for clusters or bundles.
@@ -409,7 +408,7 @@ pub async fn clusters(
         .iter()
         .map(|c| format!("{}:{}", c.method, c.key))
         .collect();
-    let found = narrate::newest_for(&state, "cluster", &keys).await?;
+    let found = narrate::newest_for(&state, "cluster", &keys).await;
     for (cluster, key) in clusters.iter_mut().zip(keys) {
         cluster.narration = found.iter().find(|n| n.subject_key == key).cloned();
     }

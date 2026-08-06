@@ -45,8 +45,6 @@ pub struct DocProfile {
     pub lang: Option<String>,
     pub lang_confidence: Option<f32>,
     pub content_hash: Option<String>,
-    pub dup_group: Option<String>,
-    pub dup_group_size: Option<i32>,
     pub max_jaccard: Option<f32>,
     pub max_jaccard_doc: Option<String>,
     pub max_cosine: Option<f32>,
@@ -70,8 +68,8 @@ pub async fn upsert_profiles(pool: &PgPool, profiles: &[DocProfile]) -> CoreResu
         "INSERT INTO ovis.doc_profile (document_id, computed_at, config_hash, fingerprint, \
          connector_id, word_count, chunk_count, quality_metrics, quality_gates, \
          quality_fail_count, quality_families, canonical_url, url_class, path_depth, \
-         has_query, archive_of, lang, lang_confidence, content_hash, dup_group, \
-         dup_group_size, max_jaccard, max_jaccard_doc, max_cosine, max_cosine_doc, \
+         has_query, archive_of, lang, lang_confidence, content_hash, \
+         max_jaccard, max_jaccard_doc, max_cosine, max_cosine_doc, \
          centroid_sim, centroid_pct, cluster_id) ",
     );
     qb.push_values(profiles, |mut row, p| {
@@ -94,8 +92,6 @@ pub async fn upsert_profiles(pool: &PgPool, profiles: &[DocProfile]) -> CoreResu
             .push_bind(&p.lang)
             .push_bind(p.lang_confidence)
             .push_bind(&p.content_hash)
-            .push_bind(&p.dup_group)
-            .push_bind(p.dup_group_size)
             .push_bind(p.max_jaccard)
             .push_bind(&p.max_jaccard_doc)
             .push_bind(p.max_cosine)
@@ -106,6 +102,15 @@ pub async fn upsert_profiles(pool: &PgPool, profiles: &[DocProfile]) -> CoreResu
     });
     // COALESCE on the enrichment columns: a cheap scan that re-measures word
     // counts must not erase similarities an expensive scan established.
+    //
+    // The two quality counters are `NOT NULL DEFAULT 0`, so they cannot say
+    // "not measured" the way the nullable columns can — an unqualified
+    // assignment let a `thin`-only re-scan write 0 over a real measurement
+    // while `quality_gates` (COALESCEd) kept showing the failures, leaving the
+    // policy blind to documents whose evidence was still on screen.
+    // `quality_gates` is set exactly when the quality detector ran, so it is
+    // the honest "was this measured" flag. Assigning rather than GREATEST-ing
+    // keeps a genuine re-measure able to lower the count.
     qb.push(
         " ON CONFLICT (document_id) DO UPDATE SET \
            computed_at = now(), \
@@ -116,8 +121,10 @@ pub async fn upsert_profiles(pool: &PgPool, profiles: &[DocProfile]) -> CoreResu
            chunk_count = COALESCE(excluded.chunk_count, ovis.doc_profile.chunk_count), \
            quality_metrics = COALESCE(excluded.quality_metrics, ovis.doc_profile.quality_metrics), \
            quality_gates = COALESCE(excluded.quality_gates, ovis.doc_profile.quality_gates), \
-           quality_fail_count = GREATEST(excluded.quality_fail_count, 0), \
-           quality_families = GREATEST(excluded.quality_families, 0), \
+           quality_fail_count = CASE WHEN excluded.quality_gates IS NULL \
+               THEN ovis.doc_profile.quality_fail_count ELSE excluded.quality_fail_count END, \
+           quality_families = CASE WHEN excluded.quality_gates IS NULL \
+               THEN ovis.doc_profile.quality_families ELSE excluded.quality_families END, \
            canonical_url = COALESCE(excluded.canonical_url, ovis.doc_profile.canonical_url), \
            url_class = COALESCE(excluded.url_class, ovis.doc_profile.url_class), \
            path_depth = COALESCE(excluded.path_depth, ovis.doc_profile.path_depth), \
@@ -126,8 +133,6 @@ pub async fn upsert_profiles(pool: &PgPool, profiles: &[DocProfile]) -> CoreResu
            lang = COALESCE(excluded.lang, ovis.doc_profile.lang), \
            lang_confidence = COALESCE(excluded.lang_confidence, ovis.doc_profile.lang_confidence), \
            content_hash = COALESCE(excluded.content_hash, ovis.doc_profile.content_hash), \
-           dup_group = COALESCE(excluded.dup_group, ovis.doc_profile.dup_group), \
-           dup_group_size = COALESCE(excluded.dup_group_size, ovis.doc_profile.dup_group_size), \
            max_jaccard = GREATEST(excluded.max_jaccard, ovis.doc_profile.max_jaccard), \
            max_jaccard_doc = COALESCE(excluded.max_jaccard_doc, ovis.doc_profile.max_jaccard_doc), \
            max_cosine = GREATEST(excluded.max_cosine, ovis.doc_profile.max_cosine), \
@@ -176,44 +181,64 @@ pub async fn documents_for_canonical_urls(
     .await?)
 }
 
+/// One document's membership of one duplicate group.
+#[derive(Debug, Clone)]
+pub struct DupMembership {
+    pub document_id: String,
+    /// `hash` or `url` — which detector found the group.
+    pub method: String,
+    /// The content hash or canonical URL the group is keyed by.
+    pub group_key: String,
+    pub group_size: i32,
+    /// The member the policy keeps; every other member is a candidate.
+    pub is_keeper: bool,
+    /// Whether the group draws members from more than one connector.
+    pub cross_connector: bool,
+}
+
 /// Record duplicate-group membership for a batch of documents.
 ///
-/// `group` is namespaced by method (`hash:…`, `url:…`) so the two duplicate
-/// detectors — which measure genuinely different things — never overwrite each
-/// other's findings.
-pub async fn set_dup_groups(
-    pool: &PgPool,
-    entries: &[(String, String, i32)],
-) -> CoreResult<u64> {
+/// Keyed by `(document_id, method)`, so the exact-duplicate and URL-variant
+/// detectors genuinely cannot overwrite each other. They previously shared one
+/// column on `doc_profile` and the second phase to run silently evicted the
+/// first: a hash cluster of three came back as one member with no keeper, and
+/// documents that were still byte-identical stopped matching the
+/// `exact_duplicate` signal. A document belonging to both groups is the normal
+/// case, not a conflict.
+pub async fn set_dup_groups(pool: &PgPool, entries: &[DupMembership]) -> CoreResult<u64> {
     if entries.is_empty() {
         return Ok(0);
     }
-    // Last write wins per document, for the same "cannot affect row a second
-    // time" reason as `set_max_similarity`.
-    let mut latest: std::collections::HashMap<&str, (&str, i32)> = std::collections::HashMap::new();
-    for (id, group, size) in entries {
-        latest.insert(id.as_str(), (group.as_str(), *size));
+    // Postgres refuses an `ON CONFLICT DO UPDATE` that touches the same row
+    // twice in one statement, so collapse to one entry per (document, method)
+    // first — last write wins, as in `set_max_similarity`.
+    let mut latest: std::collections::HashMap<(&str, &str), &DupMembership> =
+        std::collections::HashMap::new();
+    for entry in entries {
+        latest.insert(
+            (entry.document_id.as_str(), entry.method.as_str()),
+            entry,
+        );
     }
-    let mut ids: Vec<String> = Vec::with_capacity(latest.len());
-    let mut groups: Vec<String> = Vec::with_capacity(latest.len());
-    let mut sizes: Vec<i32> = Vec::with_capacity(latest.len());
-    for (id, (group, size)) in latest {
-        ids.push(id.to_string());
-        groups.push(group.to_string());
-        sizes.push(size);
-    }
-    Ok(sqlx::query(
-        "INSERT INTO ovis.doc_profile (document_id, dup_group, dup_group_size) \
-         SELECT * FROM unnest($1::text[], $2::text[], $3::int[]) \
-         ON CONFLICT (document_id) DO UPDATE \
-           SET dup_group = excluded.dup_group, dup_group_size = excluded.dup_group_size",
-    )
-    .bind(&ids)
-    .bind(&groups)
-    .bind(&sizes)
-    .execute(pool)
-    .await?
-    .rows_affected())
+    let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
+        "INSERT INTO ovis.doc_dup_group \
+             (document_id, method, group_key, group_size, is_keeper, cross_connector) ",
+    );
+    qb.push_values(latest.values(), |mut row, entry| {
+        row.push_bind(&entry.document_id)
+            .push_bind(&entry.method)
+            .push_bind(&entry.group_key)
+            .push_bind(entry.group_size)
+            .push_bind(entry.is_keeper)
+            .push_bind(entry.cross_connector);
+    });
+    qb.push(
+        " ON CONFLICT (document_id, method) DO UPDATE SET \
+            group_key = excluded.group_key, group_size = excluded.group_size, \
+            is_keeper = excluded.is_keeper, cross_connector = excluded.cross_connector, \
+            computed_at = now()",
+    );
+    Ok(qb.build().execute(pool).await?.rows_affected())
 }
 
 /// Record each document's strongest similarity and the neighbour that produced
@@ -623,7 +648,12 @@ impl Policy {
 struct SignalSql {
     signal: &'static str,
     band: Band,
+    /// The predicate as this band applies it, narrowed by any guard.
     sql: String,
+    /// The same predicate without the guard. The review band is built from
+    /// these, so a document a guard held back from `auto` still reaches
+    /// `review` rather than falling out of the policy entirely.
+    base: String,
 }
 
 /// Build the per-signal predicates for a policy.
@@ -632,80 +662,140 @@ struct SignalSql {
 /// nothing here can be injected through a policy body.
 fn signal_predicates(policy: &Policy) -> Vec<SignalSql> {
     let mut out = Vec::new();
-    let mut flag = |signal: &'static str, band: Band, sql: &str| {
-        if band != Band::None {
-            out.push(SignalSql {
+
+    // A duplicate whose group spans connectors is held back from the bulk
+    // band when `cross_connector_review_only` is set: it still reaches
+    // review through the plain clause below, it just stops being something
+    // the auto band stages without a human. FineWeb's finding is that global
+    // dedup over-prunes — a document mirrored across sources is usually
+    // popular rather than redundant.
+    //
+    // The group side reads a flag the scan recorded, so the check costs
+    // nothing at read time. The similarity side probes `dup_pair` for the
+    // neighbour that produced the recorded maximum; pairs are stored with
+    // `a < b`, so the lookup is a primary-key probe, and it only runs for
+    // rows that already cleared the threshold.
+    // A duplicate group the document is a *member* of — never the keeper, which
+    // is the copy the policy is choosing to survive.
+    let in_group = |method: &str, guarded: bool| {
+        format!(
+            "EXISTS (SELECT 1 FROM ovis.doc_dup_group g \
+               WHERE g.document_id = p.document_id AND g.method = '{method}' \
+                 AND NOT g.is_keeper AND g.group_size > 1{})",
+            if guarded { " AND NOT g.cross_connector" } else { "" }
+        )
+    };
+    let pair_same_connector = |neighbour: &str| {
+        format!(
+            "NOT EXISTS (SELECT 1 FROM ovis.dup_pair dp \
+               WHERE dp.a = LEAST(p.document_id, {neighbour}) \
+                 AND dp.b = GREATEST(p.document_id, {neighbour}) \
+                 AND dp.same_connector IS FALSE)"
+        )
+    };
+
+    let mut flag = |signal: &'static str, band: Band, sql: &str, guarded: Option<&str>| {
+        match (band, guarded) {
+            (Band::None, _) => {}
+            // Auto, but the policy holds cross-connector copies to review:
+            // narrow the auto clause and keep the unguarded one at review, so
+            // the breakdown still attributes those documents to this signal.
+            (Band::Auto, Some(guarded)) if policy.cross_connector_review_only => {
+                out.push(SignalSql {
+                    signal,
+                    band: Band::Auto,
+                    sql: guarded.to_string(),
+                    base: sql.to_string(),
+                });
+                out.push(SignalSql {
+                    signal,
+                    band: Band::Review,
+                    sql: sql.to_string(),
+                    base: sql.to_string(),
+                });
+            }
+            _ => out.push(SignalSql {
                 signal,
                 band,
                 sql: sql.to_string(),
-            });
+                base: sql.to_string(),
+            }),
         }
     };
 
-    // `dup_role = 'member'` is the non-keeper side; keepers are never flagged.
     flag(
         "exact_duplicate",
         policy.exact_duplicate,
-        "(p.dup_group IS NOT NULL AND p.dup_group LIKE 'hash:%' AND p.dup_group_size > 1)",
+        &in_group("hash", false),
+        Some(&in_group("hash", true)),
     );
     flag(
         "url_variant",
         policy.url_variant,
-        "(p.dup_group IS NOT NULL AND p.dup_group LIKE 'url:%' AND p.dup_group_size > 1)",
+        &in_group("url", false),
+        Some(&in_group("url", true)),
     );
     flag(
         "asset",
         policy.asset,
         "(p.url_class IN ('image','media','archive') AND COALESCE(p.chunk_count, 0) <= 1)",
+        None,
     );
-    flag("stub", policy.stub, "(p.chunk_count = 0)");
+    flag("stub", policy.stub, "(p.chunk_count = 0)", None);
 
-    for (signal, column, threshold) in [
-        ("near_duplicate", "p.max_jaccard", &policy.near_duplicate),
-        ("semantic", "p.max_cosine", &policy.semantic),
+    for (signal, column, neighbour, threshold) in [
+        (
+            "near_duplicate",
+            "p.max_jaccard",
+            "p.max_jaccard_doc",
+            &policy.near_duplicate,
+        ),
+        (
+            "semantic",
+            "p.max_cosine",
+            "p.max_cosine_doc",
+            &policy.semantic,
+        ),
     ] {
         if let Some(auto) = threshold.auto {
-            out.push(SignalSql {
-                signal,
-                band: Band::Auto,
-                sql: format!("({column} >= {auto})"),
-            });
+            let base = format!("({column} >= {auto})");
+            let guarded = format!("({base} AND {})", pair_same_connector(neighbour));
+            flag(signal, Band::Auto, &base, Some(&guarded));
         }
         if let Some(review) = threshold.review {
-            out.push(SignalSql {
-                signal,
-                band: Band::Review,
-                sql: format!("({column} >= {review})"),
-            });
+            flag(signal, Band::Review, &format!("({column} >= {review})"), None);
         }
     }
 
     if let Some(min) = policy.quality.review_min_failures {
-        out.push(SignalSql {
-            signal: "quality",
-            band: Band::Review,
-            sql: format!(
+        flag(
+            "quality",
+            Band::Review,
+            &format!(
                 "(p.quality_fail_count >= {min} AND p.quality_families >= {})",
                 policy.quality.min_families
             ),
-        });
+            None,
+        );
     }
     if let Some(min) = policy.quality.auto_min_failures {
-        out.push(SignalSql {
-            signal: "quality",
-            band: Band::Auto,
-            sql: format!(
+        flag(
+            "quality",
+            Band::Auto,
+            &format!(
                 "(p.quality_fail_count >= {min} AND p.quality_families >= {})",
                 policy.quality.min_families
             ),
-        });
+            None,
+        );
     }
     if let Some(pct) = policy.off_topic_percentile {
-        out.push(SignalSql {
-            signal: "off_topic",
-            band: Band::Review,
-            sql: format!("(p.centroid_pct IS NOT NULL AND p.centroid_pct <= {pct})"),
-        });
+        flag(
+            "off_topic",
+            Band::Review,
+            &format!("(p.centroid_pct IS NOT NULL AND p.centroid_pct <= {pct})"),
+            None,
+        );
     }
     out
 }
@@ -720,16 +810,21 @@ fn signal_predicates(policy: &Policy) -> Vec<SignalSql> {
 /// reads as "this policy would do nothing" rather than as a missing
 /// measurement, which is the most misleading answer the simulation could give.
 fn band_predicate(policy: &Policy, band: Band) -> String {
-    let parts: Vec<String> = signal_predicates(policy)
-        .into_iter()
-        .filter(|s| match band {
-            Band::Auto => s.band == Band::Auto,
-            // Anything that reaches auto also reaches review.
-            Band::Review => true,
-            Band::None => false,
-        })
-        .map(|s| s.sql)
-        .collect();
+    let mut parts: Vec<String> = Vec::new();
+    for signal in signal_predicates(policy) {
+        let part = match band {
+            Band::Auto if signal.band == Band::Auto => signal.sql,
+            Band::Auto => continue,
+            // Anything that reaches auto also reaches review — and it reaches
+            // it *unguarded*, so a cross-connector duplicate held back from
+            // the bulk band still lands in review rather than nowhere.
+            Band::Review => signal.base,
+            Band::None => continue,
+        };
+        if !parts.contains(&part) {
+            parts.push(part);
+        }
+    }
     if parts.is_empty() {
         "FALSE".to_string()
     } else {
@@ -914,6 +1009,61 @@ pub async fn sample_band(
     .await?)
 }
 
+/// Which signals fired for each of `ids` — the batched form of
+/// [`signals_for_document`], and the one every bulk path uses.
+///
+/// One statement evaluates every predicate for a whole page as boolean
+/// columns. The per-document form costs one round trip *per signal per
+/// document*: committing a band of 200k documents under a policy with ten
+/// active signals meant two million queries, which is not a slow commit but an
+/// unusable one.
+pub async fn signals_for_documents(
+    pool: &PgPool,
+    policy: &Policy,
+    ids: &[String],
+) -> CoreResult<std::collections::HashMap<String, Vec<(String, String)>>> {
+    let mut out: std::collections::HashMap<String, Vec<(String, String)>> =
+        std::collections::HashMap::new();
+    if ids.is_empty() {
+        return Ok(out);
+    }
+    let signals = signal_predicates(policy);
+    if signals.is_empty() {
+        return Ok(out);
+    }
+    let columns: Vec<String> = signals
+        .iter()
+        .enumerate()
+        .map(|(i, s)| format!("COALESCE({}, FALSE) AS s{i}", s.sql))
+        .collect();
+    let rows = sqlx::query(&format!(
+        "SELECT p.document_id, {} FROM ovis.doc_profile p WHERE p.document_id = ANY($1)",
+        columns.join(", ")
+    ))
+    .bind(ids.to_vec())
+    .fetch_all(pool)
+    .await?;
+
+    for row in &rows {
+        let document_id: String = row.get("document_id");
+        let mut hits: Vec<(String, String)> = Vec::new();
+        for (i, signal) in signals.iter().enumerate() {
+            // The strongest band wins, as in `signals_for_document`.
+            if hits.iter().any(|(name, band)| name == signal.signal && band == "auto") {
+                continue;
+            }
+            if row.get::<Option<bool>, _>(format!("s{i}").as_str()) == Some(true) {
+                hits.retain(|(name, _)| name != signal.signal || signal.band != Band::Auto);
+                hits.push((signal.signal.to_string(), signal.band.code().to_string()));
+            }
+        }
+        if !hits.is_empty() {
+            out.insert(document_id, hits);
+        }
+    }
+    Ok(out)
+}
+
 /// Which signals fired for one document under a policy — the evidence the
 /// review UI shows next to a candidate.
 pub async fn signals_for_document(
@@ -921,8 +1071,15 @@ pub async fn signals_for_document(
     policy: &Policy,
     document_id: &str,
 ) -> CoreResult<Vec<(String, String)>> {
-    let mut hits = Vec::new();
+    let mut hits: Vec<(String, String)> = Vec::new();
     for signal in signal_predicates(policy) {
+        // One signal contributes an auto and a review clause, and anything
+        // that clears auto clears review too. Reporting both would read as two
+        // independent findings, so the strongest band wins and the weaker one
+        // is dropped.
+        if hits.iter().any(|(name, band)| name == signal.signal && band == "auto") {
+            continue;
+        }
         let matched: Option<bool> = sqlx::query_scalar(&format!(
             "SELECT COALESCE({}, FALSE) FROM ovis.doc_profile p WHERE p.document_id = $1",
             signal.sql
@@ -932,6 +1089,7 @@ pub async fn signals_for_document(
         .await?
         .flatten();
         if matched == Some(true) {
+            hits.retain(|(name, _)| name != signal.signal || signal.band != Band::Auto);
             hits.push((signal.signal.to_string(), signal.band.code().to_string()));
         }
     }
@@ -1130,7 +1288,6 @@ mod tests {
             for verb in ["insert into ", "update ", "delete from "] {
                 if let Some(pos) = lowered.find(verb) {
                     let target = lowered[pos + verb.len()..]
-                        .trim_start()
                         .split_whitespace()
                         .next()
                         .unwrap_or("");
@@ -1203,21 +1360,97 @@ mod tests {
 
     #[test]
     fn the_auto_predicate_is_a_subset_of_the_review_predicate() {
-        // Structurally: review ORs in every auto clause, so anything auto also
-        // satisfies review. The simulation relies on this to compute the
-        // review count as "review AND NOT auto" without double counting.
-        let policy = Policy::standard();
+        // Structurally: every auto clause implies a review clause, so anything
+        // auto also satisfies review. The simulation relies on this to compute
+        // the review count as "review AND NOT auto" without double counting.
+        //
+        // A cross-connector guard narrows the auto clause to `(base AND
+        // guard)` while review keeps the bare `base`, so the check strips a
+        // trailing guard before looking for the clause.
+        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+            let auto = band_predicate(&policy, Band::Auto);
+            let review = band_predicate(&policy, Band::Review);
+            for signal in signal_predicates(&policy) {
+                if signal.band != Band::Auto {
+                    continue;
+                }
+                assert!(
+                    auto.contains(&signal.sql),
+                    "auto predicate is missing {}: {auto}",
+                    signal.sql
+                );
+                assert!(
+                    review.contains(&signal.base),
+                    "review predicate is missing the auto clause for {} ({}): {review}",
+                    signal.signal,
+                    signal.base
+                );
+            }
+        }
+    }
+
+    /// The cross-connector rule is a behaviour, not a stored preference.
+    ///
+    /// It shipped as a field every preset set and no predicate read, so a
+    /// policy that claimed to hold mirrored copies back from bulk staging
+    /// staged them anyway. These assertions are on the generated SQL because
+    /// that is the only place the setting can have an effect.
+    #[test]
+    fn cross_connector_duplicates_are_kept_out_of_the_bulk_band() {
+        let mut policy = Policy::standard();
+        policy.cross_connector_review_only = true;
         let auto = band_predicate(&policy, Band::Auto);
         let review = band_predicate(&policy, Band::Review);
-        let clauses = auto
-            .trim_start_matches("COALESCE(")
-            .trim_end_matches(", FALSE)");
-        for clause in clauses.split(" OR ") {
-            assert!(
-                review.contains(clause.trim()),
-                "review predicate is missing the auto clause {clause}"
-            );
-        }
+
+        assert!(
+            auto.contains("NOT g.cross_connector"),
+            "the duplicate-group auto band must exclude cross-connector groups: {auto}"
+        );
+        assert!(
+            auto.contains("ovis.dup_pair"),
+            "the similarity auto band must exclude cross-connector pairs: {auto}"
+        );
+        // Held back, not dropped: review keeps the *unguarded* clause, so a
+        // mirrored copy is still surfaced for a human rather than vanishing
+        // from the policy altogether.
+        assert!(
+            !review.contains("cross_connector") && !review.contains("ovis.dup_pair"),
+            "the review band must not carry the guard: {review}"
+        );
+        assert!(
+            review.contains("g.method = 'hash'") && review.contains("p.max_jaccard >= 0.9"),
+            "cross-connector duplicates must still reach the review band: {review}"
+        );
+        // The keeper is the copy the policy is choosing to survive, so it must
+        // never be selectable by any band.
+        assert!(
+            review.contains("NOT g.is_keeper"),
+            "a group's keeper must never be flagged: {review}"
+        );
+
+        policy.cross_connector_review_only = false;
+        let auto = band_predicate(&policy, Band::Auto);
+        assert!(
+            !auto.contains("cross_connector") && !auto.contains("ovis.dup_pair"),
+            "turning the rule off must remove the guard entirely: {auto}"
+        );
+    }
+
+    /// Signals that grant no band at all are not narrowed by the guard: a
+    /// review-only threshold is already the cautious answer.
+    #[test]
+    fn the_cross_connector_guard_only_narrows_the_bulk_band() {
+        let mut policy = Policy::conservative();
+        policy.semantic = Threshold {
+            auto: None,
+            review: Some(0.9),
+        };
+        let review = band_predicate(&policy, Band::Review);
+        assert!(review.contains("p.max_cosine >= 0.9"), "{review}");
+        assert!(
+            !review.contains("dup_pair dp \n"),
+            "a review-only threshold needs no pair probe: {review}"
+        );
     }
 
     /// Every band predicate must be NULL-safe.

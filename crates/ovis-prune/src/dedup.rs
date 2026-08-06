@@ -111,7 +111,7 @@ impl MinHashDedupEngine {
                 .wrapping_mul(6364136223846793005)
                 .wrapping_add(1442695040888963407);
             let mut a = seed;
-            if a % 2 == 0 {
+            if a.is_multiple_of(2) {
                 a = a.wrapping_add(1); // odd ⇒ coprime with 2^64
             }
 
@@ -146,13 +146,10 @@ impl MinHashDedupEngine {
 
         for shingle in shingles {
             let x = hash_shingle(shingle);
-            for i in 0..num_perm {
-                let h = self.coeffs[i]
-                    .a
-                    .wrapping_mul(x)
-                    .wrapping_add(self.coeffs[i].b);
-                if h < sig[i] {
-                    sig[i] = h;
+            for (slot, coeff) in sig.iter_mut().zip(&self.coeffs[..num_perm]) {
+                let h = coeff.a.wrapping_mul(x).wrapping_add(coeff.b);
+                if h < *slot {
+                    *slot = h;
                 }
             }
         }

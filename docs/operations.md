@@ -38,6 +38,15 @@ operational ones:
 | `OVIS_RUNTIME_REFRESH_SECS` | 60 | index-name / kNN-capability re-probe |
 | `OVIS_LOG_FORMAT` / `RUST_LOG` | text / info | `json` for shippers |
 | `OVIS_PRUNE_*` | conservative | grace period, reaper rates, batch guards — see [pruning.md](./pruning.md) |
+| `OVIS_TRASH_RETENTION_DAYS` | 30 | how long a deleted document stays restorable (1–365; zero is refused) |
+| `OVIS_TRASH_KEEP_VECTORS` | `true` | keep embeddings in the snapshot, so a restore needs no re-index (~15 kB/doc against ~5 kB) |
+| `OVIS_TRASH_PURGE_BATCH_SIZE` | 200 | expired snapshots purged per reaper cycle |
+
+Capacity note for the trash: at the defaults, a month of pruning 2,000
+documents a day holds roughly 900 MB of snapshots in the `ovis` schema. That is
+the price of every deletion being reversible; `OVIS_TRASH_KEEP_VECTORS=false`
+cuts it to about a third, at the cost of a restored document needing a re-index
+before it answers semantic queries.
 
 A blank optional value (`OVIS_API_TOKEN=` sourced with `set -a`) normalises to
 *unset* — it never becomes an empty token that any caller could satisfy.

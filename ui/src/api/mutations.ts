@@ -31,6 +31,7 @@ import type {
   PruneCommitResponse,
   TrashBulkResponse,
   LlmProvider,
+  LlmModel,
   LlmProbeResult,
   LlmRoles,
   NarrateResponse,
@@ -584,6 +585,31 @@ export function usePruneCommitPolicy() {
   });
 }
 
+/**
+ * Take a document off the "never flag again" list.
+ *
+ * The counterpart to dismissing with `exclude_future`. Removing an exclusion
+ * does not re-flag anything by itself — it only lets the next scan consider
+ * the document again — so it needs no confirmation, and the toast says so
+ * rather than implying something just came back.
+ */
+export function usePruneExclusionRemove() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (documentId: string) =>
+      api.delete<{ deleted: boolean; document_id: string }>(
+        `/prune/exclusions/${encodeDocId(documentId)}`,
+      ),
+    onSuccess: () => {
+      invalidatePrune(queryClient);
+      toast.success('Removed from the never-flag list', {
+        description: 'Nothing changed for the document itself — the next scan can consider it again.',
+      });
+    },
+    onError: (error) => errorToast('Could not remove the exclusion', error),
+  });
+}
+
 export function useTrashRestore() {
   const queryClient = useQueryClient();
   return useMutation({
@@ -672,6 +698,28 @@ export function useLlmProviderCreate() {
       });
     },
     onError: (error) => errorToast('Could not connect', error),
+  });
+}
+
+/**
+ * Re-ask a provider what it serves.
+ *
+ * Models appear and disappear behind a stable endpoint — an Ollama pull, a
+ * hosted provider's catalogue moving on — and until now the only way to pick
+ * up a change was to delete the provider and add it back, which threw away
+ * every role assignment with it.
+ */
+export function useLlmProviderDiscover() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (id: number) => api.post<{ models: LlmModel[] }>(`/llm/providers/${id}/discover`),
+    onSuccess: (res) => {
+      void queryClient.invalidateQueries({ queryKey: ['llm'] });
+      toast.success(
+        res.models.length === 1 ? '1 model available' : `${res.models.length} models available`,
+      );
+    },
+    onError: (error) => errorToast('Could not re-read the catalogue', error),
   });
 }
 

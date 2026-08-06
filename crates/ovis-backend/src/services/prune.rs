@@ -10,7 +10,7 @@
 //!   `confirm_count` against it — a drifted set is a 409 carrying the fresh
 //!   count, and nothing is changed.
 
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
+use chrono::{DateTime, Utc};
 use ovis_core::api_types::{
     ListResponse, PruneAuditItem, PruneBulkFailure, PruneBulkResponse, PruneCandidateDetail,
     PruneCandidateFilterBody, PruneCandidateItem, PruneDismissRequest, PruneExclusionItem,
@@ -350,7 +350,7 @@ pub async fn candidate_detail(state: &AppState, id: i64) -> Result<PruneCandidat
     // Hydrate both sides of a duplicate pair, when one exists.
     let pair = match duplicate_reason(&item.reasons) {
         Some((kept_id, similarity)) => {
-            let kept = documents::documents_by_ids(&state.db, &[kept_id.clone()], None)
+            let kept = documents::documents_by_ids(&state.db, std::slice::from_ref(&kept_id), None)
                 .await?
                 .into_iter()
                 .next();
@@ -506,20 +506,18 @@ pub async fn set_hidden(state: &AppState, id: &str, hidden: bool) -> Result<&'st
     }
 }
 
-/// When the grace period for a newly staged document ends.
-pub fn grace_deadline(state: &AppState, now: DateTime<Utc>) -> DateTime<Utc> {
-    now + ChronoDuration::days(state.cfg.prune_grace_days)
-}
-
 /// Stage one candidate row: record `prev_hidden`, hide, flip state. Used by
 /// the stage endpoint, schedule-delete (for candidates), and the reaper's
 /// recrawl re-stage.
+///
+/// Returns the deadline **the database wrote**, not one computed here, so
+/// audit rows and API responses report the instant the reaper will actually
+/// compare against.
 pub async fn stage_one(
     state: &AppState,
     row: &PruneCandidateItem,
-    expires_at: DateTime<Utc>,
     staged_by: &str,
-) -> Result<(&'static str, bool), AppError> {
+) -> Result<(&'static str, bool, DateTime<Utc>), AppError> {
     let prev_hidden = match db::document_hidden(&state.db, &row.document_id).await? {
         Some(hidden) => hidden,
         None => {
@@ -532,8 +530,10 @@ pub async fn stage_one(
 
     let via = set_hidden(state, &row.document_id, true).await?;
 
-    let flipped = db::mark_staged(&state.db, row.id, prev_hidden, expires_at, staged_by).await?;
-    if !flipped {
+    let deadline =
+        db::mark_staged(&state.db, row.id, prev_hidden, state.cfg.prune_grace_days, staged_by)
+            .await?;
+    let Some(expires_at) = deadline else {
         // Lost a race: someone else moved this row while we were hiding. If
         // the row is no longer headed for deletion and the document was
         // visible before, put the flag back the way we found it.
@@ -549,8 +549,8 @@ pub async fn stage_one(
             "candidate {} changed state while staging; nothing further was done",
             row.id
         )));
-    }
-    Ok((via, prev_hidden))
+    };
+    Ok((via, prev_hidden, expires_at))
 }
 
 // ---------------------------------------------------------------------------
@@ -574,7 +574,8 @@ pub async fn stage(
     .await?;
 
     let who = actor(state);
-    let expires_at = grace_deadline(state, Utc::now());
+    // The deadline is the database's, reported back rather than predicted.
+    let mut latest_deadline: Option<DateTime<Utc>> = None;
     let mut changed = 0i64;
     let mut failed = Vec::new();
     let mut via_seen: Option<String> = None;
@@ -584,10 +585,11 @@ pub async fn stage(
             failed.push(bulk_failure(row, "WRONG_STATE"));
             continue;
         }
-        match stage_one(state, row, expires_at, who).await {
-            Ok((via, prev_hidden)) => {
+        match stage_one(state, row, who).await {
+            Ok((via, prev_hidden, expires_at)) => {
                 changed += 1;
                 via_seen = Some(via.to_string());
+                latest_deadline = Some(latest_deadline.map_or(expires_at, |d: DateTime<Utc>| d.max(expires_at)));
                 db::audit(
                     &state.db,
                     who,
@@ -617,7 +619,7 @@ pub async fn stage(
         failed,
         state: "staged".into(),
         boost_hidden_via: via_seen,
-        stage_expires_at: Some(expires_at),
+        stage_expires_at: latest_deadline,
     })
 }
 
@@ -781,7 +783,6 @@ pub async fn schedule_delete(
     .await?;
 
     let who = actor(state);
-    let expires_at = grace_deadline(state, Utc::now());
     let mut changed = 0i64;
     let mut failed = Vec::new();
     let mut via_seen: Option<String> = None;
@@ -792,8 +793,8 @@ pub async fn schedule_delete(
         // row never *clears* a remember set earlier.
         let remember = request.remember.unwrap_or(row.remember || row.recrawl_risk);
         match row.state.as_str() {
-            "candidate" => match stage_one(state, row, expires_at, who).await {
-                Ok((via, prev_hidden)) => {
+            "candidate" => match stage_one(state, row, who).await {
+                Ok((via, prev_hidden, expires_at)) => {
                     let _ = db::set_remember(&state.db, row.id, remember).await;
                     changed += 1;
                     via_seen = Some(via.to_string());

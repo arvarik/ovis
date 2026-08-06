@@ -12,7 +12,7 @@
  */
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { trashDetailQuery, trashQuery } from '@/api/queries';
+import { connectorsQuery, pruneStatusQuery, trashDetailQuery, trashQuery } from '@/api/queries';
 import { useTrashHold, useTrashPurge, useTrashRestore } from '@/api/mutations';
 import type { TrashItem } from '@/api/types';
 import { Badge } from '@/components/primitives/Badge';
@@ -22,25 +22,51 @@ import { Checkbox } from '@/components/primitives/Checkbox';
 import { Dialog } from '@/components/primitives/Dialog';
 import { EmptyState } from '@/components/primitives/EmptyState';
 import { Input } from '@/components/primitives/Input';
+import { Select } from '@/components/primitives/Select';
 import { Sheet } from '@/components/primitives/Sheet';
 import { Skeleton } from '@/components/primitives/Skeleton';
 import { bytes as formatBytes, count as formatCount } from '@/lib/format';
 import { graceCountdown, useNow } from './pruneShared';
+
+const PAGE_SIZE = 50;
 
 export function TrashTab() {
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [inspecting, setInspecting] = useState<string | null>(null);
   const [purging, setPurging] = useState(false);
+  const [connectorId, setConnectorId] = useState('');
+  const [holdFilter, setHoldFilter] = useState('');
+  const [expiring, setExpiring] = useState('');
   const now = useNow();
 
-  const trash = useQuery(trashQuery({ limit: 50, page }));
+  const params = {
+    limit: PAGE_SIZE,
+    page,
+    connector_id: connectorId ? Number(connectorId) : undefined,
+    hold: holdFilter === '' ? undefined : holdFilter === 'true',
+    expiring_within_days: expiring ? Number(expiring) : undefined,
+  };
+  const trash = useQuery(trashQuery(params));
+  const connectors = useQuery(connectorsQuery);
+  // The aggregate is a server truth; deriving it from the loaded page would
+  // report the trash as whatever fits on screen.
+  const counts = useQuery(pruneStatusQuery).data?.trash;
   const restore = useTrashRestore();
   const hold = useTrashHold();
 
   const items = trash.data?.items ?? [];
   const total = trash.data?.total ?? 0;
   const selectedItems = items.filter((item) => selected.has(item.document_id));
+  const filtersActive = connectorId !== '' || holdFilter !== '' || expiring !== '';
+
+  const changeFilter = (apply: () => void) => {
+    apply();
+    setPage(1);
+    // A selection is a set of ids from a list that no longer exists; carrying
+    // it across a filter change is how people purge something they cannot see.
+    setSelected(new Set());
+  };
 
   const toggle = (id: string) => {
     setSelected((prev) => {
@@ -61,7 +87,7 @@ export function TrashTab() {
     );
   }
 
-  if (total === 0) {
+  if (total === 0 && !filtersActive) {
     return (
       <EmptyState
         title="Nothing in the trash"
@@ -77,6 +103,98 @@ export function TrashTab() {
         record of them. OVIS still holds a complete snapshot, so restoring puts back the text,
         the tags, the connector attribution and the embedding vectors.
       </p>
+
+      {/* The server already aggregates all of this; showing only a row count
+          threw away the two facts that decide what to do next — how much disk
+          the trash is holding, and how much of it is about to expire. */}
+      {counts ? (
+        <Card className="grid gap-4 p-4 sm:grid-cols-4">
+          <TrashFigure label="Snapshots" value={formatCount(counts.items)} />
+          <TrashFigure label="Holding" value={formatBytes(counts.bytes)} />
+          <TrashFigure
+            label="Expiring within 7 days"
+            value={formatCount(counts.expiring_7d)}
+            tone={counts.expiring_7d > 0 ? 'gold' : undefined}
+            hint={
+              counts.soonest_expiry
+                ? `soonest in ${graceCountdown(counts.soonest_expiry, now)}`
+                : undefined
+            }
+          />
+          <TrashFigure
+            label="On hold"
+            value={formatCount(counts.on_hold)}
+            hint={counts.restored_total > 0 ? `${formatCount(counts.restored_total)} restored so far` : undefined}
+          />
+        </Card>
+      ) : null}
+
+      <Card className="flex flex-wrap items-center gap-2 p-3">
+        <Select
+          value={connectorId}
+          onValueChange={(value) => changeFilter(() => setConnectorId(value))}
+          ariaLabel="Filter by connector"
+          className="w-56"
+          options={[
+            { value: '', label: 'any connector' },
+            ...(connectors.data ?? [])
+              .filter((c) => c.connector_id !== null)
+              .map((c) => ({
+                value: String(c.connector_id),
+                label: c.name ?? `connector ${c.connector_id}`,
+              })),
+          ]}
+        />
+        <Select
+          value={expiring}
+          onValueChange={(value) => changeFilter(() => setExpiring(value))}
+          ariaLabel="Filter by how soon retention ends"
+          className="w-52"
+          options={[
+            { value: '', label: 'any retention left' },
+            { value: '1', label: 'expiring within a day' },
+            { value: '7', label: 'expiring within 7 days' },
+            { value: '30', label: 'expiring within 30 days' },
+          ]}
+        />
+        <Select
+          value={holdFilter}
+          onValueChange={(value) => changeFilter(() => setHoldFilter(value))}
+          ariaLabel="Filter by hold"
+          className="w-44"
+          options={[
+            { value: '', label: 'held and not' },
+            { value: 'true', label: 'on hold only' },
+            { value: 'false', label: 'not held' },
+          ]}
+        />
+        {filtersActive ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() =>
+              changeFilter(() => {
+                setConnectorId('');
+                setHoldFilter('');
+                setExpiring('');
+              })
+            }
+          >
+            Clear filters
+          </Button>
+        ) : null}
+        <span className="ml-auto text-caption text-ink-mute">
+          {formatCount(total)} snapshot{total === 1 ? '' : 's'}
+          {filtersActive ? ' matching' : ''}
+        </span>
+      </Card>
+
+      {total === 0 ? (
+        <EmptyState
+          title="No snapshots match"
+          description="Nothing in the trash fits these filters. Clear them to see everything that is still restorable."
+        />
+      ) : null}
 
       {selectedItems.length > 0 ? (
         <Card className="flex flex-wrap items-center gap-2 p-3">
@@ -121,34 +239,36 @@ export function TrashTab() {
         </Card>
       ) : null}
 
-      <Card className="overflow-x-auto">
-        <table className="w-full text-label">
-          <thead className="text-ink-mute">
-            <tr className="border-b border-line">
-              <th className="w-8 p-2" />
-              <th className="p-2 text-left font-normal">Document</th>
-              <th className="p-2 text-left font-normal">Deleted</th>
-              <th className="p-2 text-left font-normal">Recoverable for</th>
-              <th className="p-2 text-right font-normal">Snapshot</th>
-              <th className="w-24 p-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item) => (
-              <TrashRow
-                key={item.document_id}
-                item={item}
-                now={now}
-                checked={selected.has(item.document_id)}
-                onToggle={() => toggle(item.document_id)}
-                onInspect={() => setInspecting(item.document_id)}
-              />
-            ))}
-          </tbody>
-        </table>
-      </Card>
+      {items.length > 0 ? (
+        <Card className="overflow-x-auto">
+          <table className="w-full text-label">
+            <thead className="text-ink-mute">
+              <tr className="border-b border-line">
+                <th className="w-8 p-2" />
+                <th className="p-2 text-left font-normal">Document</th>
+                <th className="p-2 text-left font-normal">Deleted</th>
+                <th className="p-2 text-left font-normal">Recoverable for</th>
+                <th className="p-2 text-right font-normal">Snapshot</th>
+                <th className="w-24 p-2" />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((item) => (
+                <TrashRow
+                  key={item.document_id}
+                  item={item}
+                  now={now}
+                  checked={selected.has(item.document_id)}
+                  onToggle={() => toggle(item.document_id)}
+                  onInspect={() => setInspecting(item.document_id)}
+                />
+              ))}
+            </tbody>
+          </table>
+        </Card>
+      ) : null}
 
-      {total > 50 ? (
+      {total > PAGE_SIZE ? (
         <div className="flex items-center justify-between">
           <Button
             size="sm"
@@ -402,5 +522,29 @@ function PurgeDialog({
         </div>
       </div>
     </Dialog>
+  );
+}
+
+function TrashFigure({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+  tone?: 'gold';
+}) {
+  return (
+    <div>
+      <div className="text-label text-ink-mute">{label}</div>
+      <div
+        className={`font-display text-title tabular-nums ${tone === 'gold' ? 'text-gold' : 'text-ink'}`}
+      >
+        {value}
+      </div>
+      {hint ? <div className="mt-0.5 text-caption text-ink-mute">{hint}</div> : null}
+    </div>
   );
 }

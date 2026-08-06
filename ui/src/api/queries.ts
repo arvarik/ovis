@@ -32,6 +32,11 @@ import type {
   PruneHistogramBucket,
   PruneCluster,
   PruneSamplePlan,
+  PruneStoredPolicy,
+  PruneExclusionItem,
+  BackgroundErrorItem,
+  TagKeyItem,
+  VersionResponse,
   TrashItem,
   TrashDetail,
   LlmProvider,
@@ -289,6 +294,43 @@ export function indexingAttemptsQuery(status?: string, limit = 50) {
   });
 }
 
+/**
+ * Errors the indexing workers recorded outside any single attempt.
+ *
+ * These do not appear on an attempt's own error list — that is the whole
+ * reason Onyx keeps them separately — so a run that "succeeded" can still have
+ * left one of these behind, and nothing surfaced them until now.
+ */
+export function backgroundErrorsQuery(ccPairId?: number, limit = 50) {
+  return queryOptions({
+    queryKey: ['indexing', 'background-errors', ccPairId ?? 'all', limit],
+    queryFn: ({ signal }) =>
+      api.get<BackgroundErrorItem[]>(
+        '/indexing/background-errors',
+        { cc_pair_id: ccPairId, limit },
+        signal,
+      ),
+    staleTime: 10_000,
+  });
+}
+
+/** Tag keys with how many distinct values each has — the tag-rule vocabulary. */
+export function tagKeysQuery(limit = 100) {
+  return queryOptions({
+    queryKey: ['tags', 'keys', limit],
+    queryFn: ({ signal }) => api.get<TagKeyItem[]>('/tags/keys', { limit }, signal),
+    staleTime: 60_000,
+  });
+}
+
+/** Build provenance. Static for the life of the process, so it never refetches. */
+export const versionQuery = queryOptions({
+  queryKey: ['system', 'version'],
+  queryFn: ({ signal }) => api.get<VersionResponse>('/system/version', undefined, signal),
+  staleTime: Infinity,
+  gcTime: Infinity,
+});
+
 // ---------------------------------------------------------------------------
 // Pruning
 // ---------------------------------------------------------------------------
@@ -408,19 +450,53 @@ export function pruneHistogramQuery(signal_: string, buckets = 20) {
   });
 }
 
-export function pruneClustersQuery(method: string, limit = 20) {
+/**
+ * One page of duplicate clusters. `after` is the key cursor the server pages
+ * by, so review can walk past the first screen — 49,683 hash groups is not a
+ * single request.
+ */
+export function pruneClustersQuery(method: string, limit = 20, after?: string) {
   return queryOptions({
-    queryKey: ['prune', 'clusters', method, limit],
+    queryKey: ['prune', 'clusters', method, limit, after ?? null],
     queryFn: ({ signal }) =>
-      api.get<{ items: PruneCluster[] }>('/prune/clusters', { method, limit }, signal),
+      api.get<{ items: PruneCluster[] }>(
+        '/prune/clusters',
+        { method, limit, after: after || undefined },
+        signal,
+      ),
     staleTime: 10_000,
   });
 }
 
-export function pruneSampleQuery(params: QueryParams) {
+/** Saved threshold sets, with the active one flagged. */
+export const prunePoliciesQuery = queryOptions({
+  queryKey: ['prune', 'policies'],
+  queryFn: ({ signal }) =>
+    api.get<{ items: PruneStoredPolicy[] }>('/prune/policies', undefined, signal),
+  staleTime: 15_000,
+});
+
+/**
+ * The "never flag again" list.
+ *
+ * Read *and* writable-back: dismissing with "never flag again" is otherwise a
+ * one-way door from the UI, and an exclusion added by accident has no other
+ * way home.
+ */
+export function pruneExclusionsQuery(params: QueryParams) {
+  return queryOptions({
+    queryKey: ['prune', 'exclusions', params],
+    queryFn: ({ signal }) =>
+      api.get<ListResponse<PruneExclusionItem>>('/prune/exclusions', params, signal),
+    staleTime: 10_000,
+  });
+}
+
+export function pruneSampleQuery(params: QueryParams, enabled = true) {
   return queryOptions({
     queryKey: ['prune', 'sample', params],
     queryFn: ({ signal }) => api.get<PruneSamplePlan>('/prune/sample', params, signal),
+    enabled,
     // A sample is a draw, not a cached fact: refetching must redraw.
     staleTime: 0,
     gcTime: 0,

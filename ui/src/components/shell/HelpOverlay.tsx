@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { versionQuery } from '@/api/queries';
 import { Dialog } from '@/components/primitives/Dialog';
 import { Input } from '@/components/primitives/Input';
 import { Kbd } from '@/components/primitives/Kbd';
@@ -78,6 +80,29 @@ export function HelpOverlay({
           ))}
         </div>
       )}
+      <BuildStamp />
     </Dialog>
+  );
+}
+
+/**
+ * Which build is answering.
+ *
+ * The backend has always served this and nothing showed it, so "is the fix
+ * deployed?" was a question you answered by ssh. It belongs here rather than in
+ * a corner of the chrome: it is reference information, wanted rarely and
+ * exactly when something looks wrong.
+ */
+function BuildStamp() {
+  const build = useQuery(versionQuery);
+  if (!build.data) return null;
+  const { version, git_sha, profile, built_at } = build.data;
+  return (
+    <p className="mt-5 border-t border-line pt-3 text-caption text-ink-faint">
+      OVIS {version}
+      {git_sha ? ` · ${git_sha.slice(0, 7)}` : ''}
+      {profile && profile !== 'release' ? ` · ${profile}` : ''}
+      {built_at ? ` · built ${built_at}` : ''}
+    </p>
   );
 }

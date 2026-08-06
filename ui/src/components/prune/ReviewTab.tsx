@@ -22,6 +22,7 @@ import type {
   PruneStatusResponse,
 } from '@/api/types';
 import type { QueryParams } from '@/api/client';
+import { Badge } from '@/components/primitives/Badge';
 import { Button } from '@/components/primitives/Button';
 import { Card } from '@/components/primitives/Card';
 import { Checkbox } from '@/components/primitives/Checkbox';
@@ -32,22 +33,73 @@ import { Skeleton } from '@/components/primitives/Skeleton';
 import { count as formatCount } from '@/lib/format';
 import { CandidateSheet } from './CandidateSheet';
 import { PruneConfirmDialog } from './PruneConfirmDialog';
+import { ScanHistory } from './ScanHistory';
 import { chunkLabel, documentLabel, ReasonChips, RiskBadge } from './pruneShared';
 
-const DETECTORS: Array<{ name: PruneScanDetector; label: string; note: string }> = [
-  { name: 'exact_duplicate', label: 'Exact duplicates', note: 'identical content hashes; pure database scan' },
-  { name: 'thin', label: 'Thin content', note: '0-chunk stubs, age-gated 7 days' },
-  { name: 'near_duplicate', label: 'Near duplicates', note: 'MinHash over chunk text — slower, reads the index' },
-  { name: 'language', label: 'Language', note: 'reads chunk text; also needs language.enabled in the detector config' },
-  { name: 'url_rule', label: 'URL rules', note: 'your enabled URL patterns' },
-  { name: 'tag_rule', label: 'Tag rules', note: 'your enabled tag patterns' },
-  { name: 'stale', label: 'Stale', note: 'old pages on still-active connectors; report-only shape' },
+/**
+ * Every detector the scanner knows (`services::prune::KNOWN_DETECTORS`).
+ *
+ * `cost` is what actually decides whether someone ticks a box: a pure-database
+ * detector runs the whole corpus in minutes, one that reads chunk text takes
+ * an hour and a quarter. Grouping by it makes the cheap ones the obvious
+ * default rather than a thing you learn after waiting.
+ */
+const DETECTORS: Array<{
+  name: PruneScanDetector;
+  label: string;
+  note: string;
+  cost: 'sql' | 'text' | 'profiles';
+}> = [
+  { name: 'exact_duplicate', label: 'Exact duplicates', note: 'identical content hashes', cost: 'sql' },
+  { name: 'thin', label: 'Thin content', note: '0-chunk stubs, age-gated 7 days', cost: 'sql' },
+  {
+    name: 'url_junk',
+    label: 'Files indexed as pages',
+    note: 'image, media and archive URLs. PDFs are treated as real content, not assets',
+    cost: 'sql',
+  },
+  {
+    name: 'url_variant',
+    label: 'Same page, different URL',
+    note: 'groups by canonical URL, folding tracking parameters, scheme and www',
+    cost: 'profiles',
+  },
+  { name: 'stale', label: 'Stale', note: 'old pages on still-active connectors; policy, not junk', cost: 'sql' },
+  { name: 'url_rule', label: 'URL rules', note: 'your enabled URL patterns', cost: 'sql' },
+  { name: 'tag_rule', label: 'Tag rules', note: 'your enabled tag patterns', cost: 'sql' },
+  {
+    name: 'near_duplicate',
+    label: 'Near duplicates',
+    note: 'MinHash over chunk text; signatures persist, so re-scans only recompute what changed',
+    cost: 'text',
+  },
+  {
+    name: 'quality',
+    label: 'Text quality',
+    note: 'published Gopher/FineWeb/C4 gates. Never auto-stages — review is always required',
+    cost: 'text',
+  },
+  {
+    name: 'language',
+    label: 'Language',
+    note: 'ships disabled; also needs language.enabled in the detector config',
+    cost: 'text',
+  },
 ];
 
+const COST_LABEL: Record<'sql' | 'text' | 'profiles', string> = {
+  sql: 'database only',
+  text: 'reads chunk text — slower',
+  profiles: 'uses stored profiles',
+};
+
+/** Mirrors `services::prune::REASON_DETECTORS` — what candidate rows carry. */
 const REASON_DETECTOR_OPTIONS = [
   { value: '', label: 'any detector' },
   { value: 'duplicate', label: 'duplicate' },
   { value: 'thin', label: 'thin' },
+  { value: 'quality', label: 'text quality' },
+  { value: 'url_junk', label: 'url junk' },
   { value: 'language', label: 'language' },
   { value: 'url_rule', label: 'url rule' },
   { value: 'tag_rule', label: 'tag rule' },
@@ -73,6 +125,7 @@ export function ReviewTab() {
   const [riskyOnly, setRiskyOnly] = useState(false);
   const [connectorId, setConnectorId] = useState('');
   const [sort, setSort] = useState('confidence_desc');
+  const [scanId, setScanId] = useState<number | null>(null);
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<ReadonlySet<number>>(new Set());
   const [openCandidate, setOpenCandidate] = useState<number | null>(null);
@@ -86,11 +139,12 @@ export function ReviewTab() {
       min_confidence: minConfidence > 0 ? minConfidence : undefined,
       recrawl_risk: riskyOnly ? true : undefined,
       connector_id: connectorId ? Number(connectorId) : undefined,
+      scan_id: scanId ?? undefined,
       sort,
       limit: PAGE_SIZE,
       page,
     }),
-    [detector, minConfidence, riskyOnly, connectorId, sort, page],
+    [detector, minConfidence, riskyOnly, connectorId, scanId, sort, page],
   );
   const candidates = useQuery(pruneCandidatesQuery(params));
 
@@ -100,6 +154,7 @@ export function ReviewTab() {
     min_confidence: minConfidence > 0 ? minConfidence : undefined,
     recrawl_risk: riskyOnly ? true : undefined,
     connector_id: connectorId ? Number(connectorId) : undefined,
+    scan_id: scanId ?? undefined,
   };
 
   const items = candidates.data?.items ?? [];
@@ -120,11 +175,28 @@ export function ReviewTab() {
   const clearSelection = () => setSelected(new Set());
   const limits = status.data?.limits;
   const filtersActive =
-    detector !== '' || connectorId !== '' || riskyOnly || minConfidence > 0;
+    detector !== '' || connectorId !== '' || riskyOnly || minConfidence > 0 || scanId !== null;
 
   return (
     <div className="space-y-4">
       <ScanLauncher status={status.data} />
+
+      <ScanHistory
+        onViewCandidates={(id) => {
+          setScanId(id);
+          setPage(1);
+          clearSelection();
+        }}
+      />
+
+      {scanId !== null ? (
+        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-gold/40 bg-gold/10 p-3">
+          <span className="text-label text-ink">Showing only what scan #{scanId} produced.</span>
+          <Button size="sm" variant="ghost" onClick={() => setScanId(null)}>
+            Show all candidates
+          </Button>
+        </div>
+      ) : null}
 
       <Card className="space-y-3">
         <div className="flex flex-wrap items-center gap-2">
@@ -541,11 +613,28 @@ function ScanLauncher({ status }: { status: PruneStatusResponse | undefined }) {
             />
             <span>
               {detector.label}
-              <span className="block text-caption text-ink-faint">{detector.note}</span>
+              {detector.cost === 'text' ? (
+                <Badge tone="gold" className="ml-1.5">
+                  slow
+                </Badge>
+              ) : null}
+              <span className="block text-caption text-ink-faint">
+                {detector.note} · {COST_LABEL[detector.cost]}
+              </span>
             </span>
           </label>
         ))}
       </fieldset>
+
+      {/* The difference between the two passes is ~1,700 docs/s and ~380, which
+          on a full corpus is 17 minutes against an hour and a quarter. Worth
+          knowing before pressing the button, not after. */}
+      {[...chosen].some((name) => DETECTORS.find((d) => d.name === name)?.cost === 'text') ? (
+        <p className="text-caption text-gold">
+          This scan reads chunk text, so it runs at roughly a fifth of the database-only rate. It
+          is checkpointed and resumable, and you can cancel it between pages.
+        </p>
+      ) : null}
 
       <div className="flex justify-end">
         <Button

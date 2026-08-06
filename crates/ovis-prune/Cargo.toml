@@ -1,6 +1,6 @@
 [package]
 name = "ovis-prune"
-version = "0.3.0"
+version.workspace = true
 edition = "2021"
 description = "Deduplication and pruning engine for OVIS"
 publish = false

@@ -133,6 +133,19 @@ fn describe(code: &str) -> (&'static str, &'static str) {
             "Previously pruned with remember, and the crawler brought it back. Re-staged \
              automatically, never deleted without the full grace period.",
         ),
+        // `commit` writes these two, so they are not user-authored rules and
+        // must not fall through to the rule wording below — after a policy
+        // commit they are usually the largest group on the screen.
+        "policy_auto" => (
+            "Matched the bulk band",
+            "Crossed the committed policy's stronger thresholds. Each candidate lists the \
+             signals that put it here; staging is still a separate, confirmed step.",
+        ),
+        "policy_review" => (
+            "Matched the review band",
+            "Crossed the committed policy's review thresholds but not its bulk ones — a human \
+             decision by construction. Each candidate lists the signals that put it here.",
+        ),
         _ => (
             "Other",
             "Flagged by a user-authored rule; the rule name is on each candidate.",
@@ -146,18 +159,31 @@ pub async fn overview(state: &AppState) -> Result<OverviewResponse, AppError> {
     // One aggregate over the candidate table, grouped by reason code. The GIN
     // index on `reasons` does not serve this, but at 207k rows the sequential
     // aggregate is well under a second and it runs once per page load.
+    //
+    // The lateral is reduced to one row per (document, code, detector) before
+    // anything is summed. Unnesting `reasons` multiplies a candidate by its
+    // reason count, so a document whose reasons repeat a code — two URL rules
+    // sharing a name, a re-scan appending an equivalent reason — would be
+    // counted once under `documents` and twice under `chunks` and
+    // `recrawl_risk`, and a card would claim more weight than the group holds.
     let rows = sqlx::query(
-        "SELECT el->>'code' AS code, \
-                el->>'detector' AS detector, \
-                count(DISTINCT pc.document_id) AS documents, \
-                COALESCE(sum(COALESCE(d.chunk_count, pc.chunk_count)), 0)::bigint AS chunks, \
-                avg(pc.confidence)::float8 AS mean_confidence, \
-                count(*) FILTER (WHERE pc.recrawl_risk) AS recrawl_risk \
-         FROM ovis.prune_candidate pc \
-         LEFT JOIN public.document d ON d.id = pc.document_id \
-         CROSS JOIN LATERAL jsonb_array_elements(pc.reasons) el \
-         WHERE pc.state = 'candidate' \
-         GROUP BY 1, 2 ORDER BY documents DESC",
+        "SELECT code, detector, \
+                count(*) AS documents, \
+                COALESCE(sum(chunks), 0)::bigint AS chunks, \
+                avg(confidence)::float8 AS mean_confidence, \
+                count(*) FILTER (WHERE recrawl_risk) AS recrawl_risk \
+         FROM ( \
+             SELECT DISTINCT ON (pc.document_id, el->>'code', el->>'detector') \
+                    el->>'code' AS code, \
+                    el->>'detector' AS detector, \
+                    COALESCE(d.chunk_count, pc.chunk_count) AS chunks, \
+                    pc.confidence, pc.recrawl_risk \
+             FROM ovis.prune_candidate pc \
+             LEFT JOIN public.document d ON d.id = pc.document_id \
+             CROSS JOIN LATERAL jsonb_array_elements(pc.reasons) el \
+             WHERE pc.state = 'candidate' \
+         ) reasons \
+         GROUP BY code, detector ORDER BY documents DESC",
     )
     .fetch_all(&state.db)
     .await
@@ -387,7 +413,7 @@ fn thousands(n: i64) -> String {
     let digits = n.abs().to_string();
     let mut out = String::with_capacity(digits.len() + digits.len() / 3);
     for (i, ch) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i) % 3 == 0 {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
             out.push(',');
         }
         out.push(ch);
@@ -463,14 +489,19 @@ async fn hydrate_sample(
         return Ok(Vec::new());
     }
     let docs = documents::documents_by_ids(&state.db, ids, None).await?;
+    let by_document = profile_db::signals_for_documents(&state.db, policy, ids)
+        .await
+        .unwrap_or_default();
     let mut out = Vec::with_capacity(docs.len());
     for doc in docs {
-        let signals = profile_db::signals_for_document(&state.db, policy, &doc.id)
-            .await
-            .unwrap_or_default()
-            .into_iter()
-            .map(|(signal, band)| format!("{signal} ({band})"))
-            .collect();
+        let signals = by_document
+            .get(&doc.id)
+            .map(|hits| {
+                hits.iter()
+                    .map(|(signal, band)| format!("{signal} ({band})"))
+                    .collect()
+            })
+            .unwrap_or_default();
         out.push(SampleDoc {
             document_id: doc.id,
             semantic_id: Some(doc.semantic_id),
@@ -549,13 +580,15 @@ pub async fn commit(state: &AppState, request: CommitRequest) -> Result<CommitRe
             break;
         }
         let rows = db::scan_documents_by_ids(&state.db, None, &ids).await?;
+        // One query for the whole page rather than one per signal per
+        // document; a large band is otherwise millions of round trips.
+        let by_document = profile_db::signals_for_documents(&state.db, &policy, &ids).await?;
         let mut hits = Vec::with_capacity(rows.len());
         for doc in &rows {
-            let signals = profile_db::signals_for_document(&state.db, &policy, &doc.id).await?;
-            if signals.is_empty() {
+            let Some(signals) = by_document.get(&doc.id) else {
                 skipped += 1;
                 continue;
-            }
+            };
             let detail = signals
                 .iter()
                 .map(|(signal, band)| format!("{signal} ({band})"))
@@ -693,29 +726,30 @@ pub async fn clusters(
         }
     };
 
-    // Group keys carry a `hash:`/`url:` prefix for members and a
-    // `hash-keeper:`/`url-keeper:` prefix for the survivor, so one query gets
-    // the whole cluster while still knowing which side is which.
+    // `ovis.doc_dup_group` holds one row per (document, method), so a document
+    // that is both a content duplicate and a URL variant appears in both
+    // clusters — which is the normal case, and which the single `dup_group`
+    // column this replaced could not express: whichever phase ran second
+    // evicted the first, and a cluster of three came back with one member and
+    // no keeper.
     let rows = sqlx::query(
-        "SELECT split_part(p.dup_group, ':', 2) AS key, \
-                p.document_id, p.dup_group LIKE '%-keeper:%' AS is_keeper, \
-                p.dup_group_size, d.semantic_id, d.link, d.chunk_count, \
+        "SELECT g.group_key AS key, g.document_id, g.is_keeper, g.group_size, \
+                d.semantic_id, d.link, d.chunk_count, \
                 COALESCE(d.doc_updated_at, d.last_modified) AS updated_at, \
                 pc.id AS candidate_id \
-         FROM ovis.doc_profile p \
-         JOIN public.document d ON d.id = p.document_id \
+         FROM ovis.doc_dup_group g \
+         JOIN public.document d ON d.id = g.document_id \
          LEFT JOIN ovis.prune_candidate pc \
-                ON pc.document_id = p.document_id AND pc.state = 'candidate' \
-         WHERE p.dup_group LIKE $1 \
-           AND ($2::text IS NULL OR split_part(p.dup_group, ':', 2) > $2) \
-           AND split_part(p.dup_group, ':', 2) IN ( \
-               SELECT split_part(dup_group, ':', 2) FROM ovis.doc_profile \
-               WHERE dup_group LIKE $1 \
-                 AND ($2::text IS NULL OR split_part(dup_group, ':', 2) > $2) \
+                ON pc.document_id = g.document_id AND pc.state = 'candidate' \
+         WHERE g.method = $1 \
+           AND ($2::text IS NULL OR g.group_key > $2) \
+           AND g.group_key IN ( \
+               SELECT group_key FROM ovis.doc_dup_group \
+               WHERE method = $1 AND ($2::text IS NULL OR group_key > $2) \
                GROUP BY 1 ORDER BY 1 LIMIT $3) \
-         ORDER BY key, is_keeper DESC, p.document_id",
+         ORDER BY key, g.is_keeper DESC, g.document_id",
     )
-    .bind(format!("{prefix}%:%"))
+    .bind(prefix)
     .bind(after)
     .bind(limit.clamp(1, 100))
     .fetch_all(&state.db)
@@ -732,7 +766,7 @@ pub async fn clusters(
             link: row.get("link"),
             chunk_count: row.get("chunk_count"),
             updated_at: row.get("updated_at"),
-            is_keeper: row.get::<Option<bool>, _>("is_keeper").unwrap_or(false),
+            is_keeper: row.get("is_keeper"),
             candidate_id: row.get("candidate_id"),
         };
         match clusters.last_mut() {
@@ -740,7 +774,7 @@ pub async fn clusters(
             _ => clusters.push(Cluster {
                 key,
                 method: prefix.to_string(),
-                size: row.get::<Option<i32>, _>("dup_group_size").unwrap_or(0) as i64,
+                size: row.get::<i32, _>("group_size") as i64,
                 members: vec![member],
                 keeper_reason: match prefix {
                     "url" => "shortest URL among documents sharing a canonical URL".into(),
@@ -870,6 +904,10 @@ mod tests {
             "lang_not_allowed",
             "stale_content",
             "recrawled_after_prune",
+            // Written by `commit`, not by a detector, but they reach the same
+            // bundle list and the same card.
+            "policy_auto",
+            "policy_review",
         ] {
             let (title, description) = describe(code);
             assert_ne!(title, "Other", "{code} needs a description");

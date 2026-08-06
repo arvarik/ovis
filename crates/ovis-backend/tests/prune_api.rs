@@ -288,7 +288,13 @@ async fn harness_with(
         ovis_core::db::trash::ensure_tables(&db).await,
         "the trash table must be creatable; the reaper refuses to delete without it"
     );
-    let llm_enabled = ovis_core::db::llm::ensure_tables(&db).await;
+    // Exactly the conjunction `serve()` uses. Setting `llm_enabled` from the
+    // provider tables alone left the annotation table uncreated while the flag
+    // said the LLM subsystem was live, and every surface that reads a
+    // generated title answered 500 — a divergence between the harness and the
+    // startup path, not of the code under test.
+    let llm_enabled = ovis_core::db::llm::ensure_tables(&db).await
+        && ovis_core::db::annotation::ensure_tables(&db).await;
     assert!(
         ovis_core::db::pending_deletes::ensure_table(&db).await,
         "the retry queue table must be creatable"
@@ -2085,7 +2091,9 @@ async fn the_overview_groups_candidates_into_described_bundles() {
     )
     .await;
 
-    let body = get(&h.app, "/api/v1/prune/overview").await.json();
+    let reply = get(&h.app, "/api/v1/prune/overview").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.json();
     assert!(body["candidates_open"].as_i64().unwrap() > 0);
     assert!(body["profiled"].as_i64().unwrap() > 0);
     assert_eq!(body["documents_total"].as_i64().unwrap(), 24);
@@ -2283,9 +2291,9 @@ async fn clusters_return_the_whole_group_with_its_keeper() {
     };
     run_scan(&h, json!({ "kind": "all" }), json!(["exact_duplicate"])).await;
 
-    let body = get(&h.app, "/api/v1/prune/clusters?method=hash&limit=10")
-        .await
-        .json();
+    let reply = get(&h.app, "/api/v1/prune/clusters?method=hash&limit=10").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.json();
     let clusters = body["items"].as_array().unwrap();
     assert!(!clusters.is_empty(), "{body}");
 
@@ -2344,6 +2352,267 @@ async fn clusters_carry_no_narration_until_one_is_generated() {
     }
 }
 
+/// The review surfaces must survive the annotation table being unreadable.
+///
+/// A generated title is decoration; Triage and Clusters compute nothing from
+/// it. But the lookup used to propagate its error, so an instance whose
+/// `llm_enabled` was true while `ovis.llm_annotation` was missing — the shape
+/// of a rolling upgrade, and the shape this suite's own harness was in —
+/// answered 500 on both screens instead of showing the mechanical
+/// descriptions.
+#[tokio::test]
+async fn a_missing_annotation_table_costs_the_titles_not_the_screen() {
+    let Some(h) = harness().await else {
+        return skip("a_missing_annotation_table_costs_the_titles_not_the_screen");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["exact_duplicate", "thin"])).await;
+    assert!(h.state.llm_enabled, "the harness must have the LLM path live");
+
+    sqlx::query("DROP TABLE ovis.llm_annotation")
+        .execute(&h.state.db)
+        .await
+        .expect("the annotation table is droppable");
+
+    let overview = get(&h.app, "/api/v1/prune/overview").await;
+    assert_eq!(overview.status, StatusCode::OK, "{}", overview.body);
+    let bundles = overview.json()["bundles"].as_array().unwrap().clone();
+    assert!(!bundles.is_empty(), "the funnel still groups the backlog");
+    for bundle in &bundles {
+        assert!(bundle.get("narration").is_none(), "{bundle}");
+        assert!(!bundle["description"].as_str().unwrap().is_empty());
+    }
+
+    let clusters = get(&h.app, "/api/v1/prune/clusters?method=hash&limit=10").await;
+    assert_eq!(clusters.status, StatusCode::OK, "{}", clusters.body);
+    assert!(!clusters.json()["items"].as_array().unwrap().is_empty());
+
+    ovis_core::db::annotation::ensure_tables(&h.state.db).await;
+}
+
+/// A duplicate mirrored across two connectors is reviewed, not bulk-staged.
+///
+/// `cross_connector_review_only` shipped as a field every preset set to true
+/// and no predicate read, so the documented behaviour — FineWeb's finding that
+/// global dedup over-prunes, because a document mirrored across sources is
+/// usually popular rather than redundant — did nothing at all. This drives the
+/// setting from both sides against real rows.
+#[tokio::test]
+async fn a_duplicate_mirrored_across_connectors_is_held_back_from_the_bulk_band() {
+    let Some(h) = harness().await else {
+        return skip("a_duplicate_mirrored_across_connectors_is_held_back_from_the_bulk_band");
+    };
+
+    // Same content on two different connectors. The shorter URL keeps.
+    for (id, connector) in [
+        ("https://paused.example/mirror", 2),
+        ("https://example.com/mirrored/copy", 1),
+    ] {
+        sqlx::query(
+            "INSERT INTO public.document \
+                 (id, boost, hidden, semantic_id, link, last_modified, chunk_count, \
+                  doc_metadata, from_ingestion_api, content_hash) \
+             VALUES ($1, 0, false, $1, $1, now() - interval '20 days', 3, '{}'::jsonb, \
+                     false, 'prune-mirror-hash')",
+        )
+        .bind(id)
+        .execute(&h.state.db)
+        .await
+        .unwrap();
+        sqlx::query(
+            "INSERT INTO public.document_by_connector_credential_pair \
+                 (id, connector_id, credential_id, has_been_indexed) VALUES ($1, $2, 1, true)",
+        )
+        .bind(id)
+        .bind(connector)
+        .execute(&h.state.db)
+        .await
+        .unwrap();
+    }
+
+    run_scan(&h, json!({ "kind": "all" }), json!(["exact_duplicate"])).await;
+
+    let cross: bool = sqlx::query_scalar(
+        "SELECT cross_connector FROM ovis.doc_dup_group \
+         WHERE document_id = $1 AND method = 'hash'",
+    )
+    .bind("https://example.com/mirrored/copy")
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert!(cross, "the scan records the connector spread");
+
+    // The same-connector fixture group must stay unmarked, or the guard would
+    // hold back every duplicate rather than the mirrored ones.
+    let same: bool = sqlx::query_scalar(
+        "SELECT cross_connector FROM ovis.doc_dup_group \
+         WHERE document_id = $1 AND method = 'hash'",
+    )
+    .bind("https://paused.example/dup/print/view")
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert!(!same, "a single-connector group is not mirrored");
+
+    // The scan also opened a candidate for every non-keeper, and policy never
+    // re-flags a document that already has one. Clear them so the bands are
+    // computed from the measurements, which is what is under test here.
+    sqlx::query("DELETE FROM ovis.prune_candidate")
+        .execute(&h.state.db)
+        .await
+        .unwrap();
+
+    use ovis_core::db::profile::{documents_in_band, Band, Policy};
+    let mut policy = Policy::standard();
+    assert!(policy.cross_connector_review_only, "the preset asks for it");
+
+    let auto = documents_in_band(&h.state.db, &policy, Band::Auto, None, 500)
+        .await
+        .unwrap();
+    let review = documents_in_band(&h.state.db, &policy, Band::Review, None, 500)
+        .await
+        .unwrap();
+    let mirrored = "https://example.com/mirrored/copy".to_string();
+    assert!(
+        !auto.contains(&mirrored),
+        "a mirrored copy must not be staged in bulk: {auto:?}"
+    );
+    assert!(
+        review.contains(&mirrored),
+        "it must still be surfaced for review, not dropped: {review:?}"
+    );
+    assert!(
+        auto.contains(&"https://paused.example/dup/print/view".to_string()),
+        "a same-connector duplicate is unaffected: {auto:?}"
+    );
+
+    // Turning the rule off is what moves it, and nothing else does.
+    policy.cross_connector_review_only = false;
+    let auto = documents_in_band(&h.state.db, &policy, Band::Auto, None, 500)
+        .await
+        .unwrap();
+    assert!(
+        auto.contains(&mirrored),
+        "with the rule off the mirrored copy joins the bulk band: {auto:?}"
+    );
+}
+
+/// The two duplicate detectors do not evict each other.
+///
+/// Membership used to be one column on `doc_profile`, so a document grouped by
+/// both content hash and canonical URL kept only whichever phase ran last —
+/// and the URL phase runs second. A three-document hash cluster came back from
+/// the API with one member and no keeper, and the `exact_duplicate` policy
+/// signal stopped matching copies that were still byte-identical. Found by
+/// running both detectors in one scan and reading the clusters screen.
+#[tokio::test]
+async fn a_document_can_belong_to_a_hash_group_and_a_url_group_at_once() {
+    let Some(h) = harness().await else {
+        return skip("a_document_can_belong_to_a_hash_group_and_a_url_group_at_once");
+    };
+    // The fixture's `?utm_source=feed` copy is both: identical content to
+    // `/dup`, and the same canonical URL once tracking parameters are folded.
+    run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["exact_duplicate", "url_junk", "url_variant"]),
+    )
+    .await;
+
+    let both: Vec<(String, i32, bool)> = sqlx::query_as(
+        "SELECT method, group_size, is_keeper FROM ovis.doc_dup_group \
+         WHERE document_id = $1 ORDER BY method",
+    )
+    .bind("https://paused.example/dup?utm_source=feed")
+    .fetch_all(&h.state.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        both.len(),
+        2,
+        "the document is in both a hash group and a URL group: {both:?}"
+    );
+    assert_eq!(both[0].0, "hash");
+    assert_eq!(both[0].1, 3, "the hash group keeps all three members");
+    assert_eq!(both[1].0, "url");
+
+    // And the clusters screen returns the whole hash group, keeper included.
+    let reply = get(&h.app, "/api/v1/prune/clusters?method=hash&limit=10").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.json();
+    let cluster = &body["items"].as_array().unwrap()[0];
+    let members = cluster["members"].as_array().unwrap();
+    assert_eq!(
+        members.len(),
+        3,
+        "every member of the hash group survives the URL phase: {cluster}"
+    );
+    assert_eq!(
+        members.iter().filter(|m| m["is_keeper"] == true).count(),
+        1,
+        "and the keeper is still one of them: {cluster}"
+    );
+    assert_eq!(cluster["size"], 3);
+}
+
+/// URL clusters are keyed by their canonical URL, one group per page.
+///
+/// The key is everything after the first colon of `url:<canonical>`; taking
+/// the second colon-separated field instead yielded the literal `http` for
+/// every group in the corpus, so every URL variant on the deployment collapsed
+/// into one unbounded cluster and the pagination cursor could not advance.
+#[tokio::test]
+async fn url_clusters_are_keyed_by_canonical_url_not_by_its_scheme() {
+    let Some(h) = harness().await else {
+        return skip("url_clusters_are_keyed_by_canonical_url_not_by_its_scheme");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["url_junk", "url_variant"])).await;
+
+    let reply = get(&h.app, "/api/v1/prune/clusters?method=url&limit=10").await;
+    assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
+    let body = reply.json();
+    let clusters = body["items"].as_array().unwrap();
+
+    // The fixture has two canonical-URL groups; they must arrive as two.
+    assert_eq!(clusters.len(), 2, "one cluster per canonical URL: {body}");
+    for cluster in clusters {
+        assert_eq!(cluster["method"], "url");
+        let key = cluster["key"].as_str().unwrap();
+        assert!(
+            key.contains("://"),
+            "the key is the canonical URL, not its scheme: {key}"
+        );
+        let members = cluster["members"].as_array().unwrap();
+        assert_eq!(
+            members.len() as i64,
+            cluster["size"].as_i64().unwrap(),
+            "every member of the group is present: {cluster}"
+        );
+        assert_eq!(
+            members.iter().filter(|m| m["is_keeper"] == true).count(),
+            1,
+            "exactly one keeper per cluster: {cluster}"
+        );
+    }
+
+    // And the cursor advances rather than returning the same page forever.
+    let first = clusters[0]["key"].as_str().unwrap();
+    let next = get(
+        &h.app,
+        &format!(
+            "/api/v1/prune/clusters?method=url&limit=10&after={}",
+            percent_encoding::utf8_percent_encode(first, percent_encoding::NON_ALPHANUMERIC)
+        ),
+    )
+    .await
+    .json();
+    for cluster in next["items"].as_array().unwrap() {
+        assert!(
+            cluster["key"].as_str().unwrap() > first,
+            "paging past {first} must not return it again: {cluster}"
+        );
+    }
+}
+
 /// Pressing the button with nothing assigned has to say what to do about it,
 /// not fail with a lookup error from three layers down.
 #[tokio::test]
@@ -2387,6 +2656,60 @@ async fn the_sampling_plan_states_its_statistical_claim() {
     assert_eq!(
         body["documents"].as_array().unwrap().len(),
         body["sample_size"].as_i64().unwrap() as usize
+    );
+}
+
+/// The grace deadline is measured by the database's clock, not the server's.
+///
+/// The reaper's due filter is `stage_expires_at <= now()`, evaluated in
+/// Postgres. Writing the deadline from the application clock made the grace
+/// period wrong by however much the two disagreed — and on a container running
+/// 23 ms ahead of Postgres, `OVIS_PRUNE_GRACE_DAYS=0` (documented and
+/// supported) produced staged documents that were never due, silently. One
+/// clock, or the window is a guess.
+#[tokio::test]
+async fn the_grace_deadline_is_written_by_the_same_clock_that_judges_it() {
+    let Some(h) = harness_with(false, |cfg| cfg.prune_grace_days = 0).await else {
+        return skip("the_grace_deadline_is_written_by_the_same_clock_that_judges_it");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let id = candidates["items"][0]["id"].as_i64().unwrap();
+
+    let staged = post_json(
+        &h.app,
+        "/api/v1/prune/candidates/stage",
+        json!({ "ids": [id], "confirm_count": 1 }),
+    )
+    .await;
+    assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
+
+    // Postgres' own verdict, which is the one the reaper asks for.
+    let due: bool = sqlx::query_scalar(
+        "SELECT stage_expires_at <= now() FROM ovis.prune_candidate WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert!(
+        due,
+        "with a zero grace period the document must be due the instant it is staged"
+    );
+
+    // And the response reports the deadline that was actually written.
+    let reported = staged.json()["stage_expires_at"].as_str().unwrap().to_string();
+    let stored: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
+        "SELECT stage_expires_at FROM ovis.prune_candidate WHERE id = $1",
+    )
+    .bind(id)
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
+    assert_eq!(
+        chrono::DateTime::parse_from_rfc3339(&reported).unwrap(),
+        stored,
+        "the API must report the stored deadline, not one it predicted"
     );
 }
 
