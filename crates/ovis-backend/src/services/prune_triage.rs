@@ -51,6 +51,11 @@ pub struct Bundle {
     pub mean_confidence: f64,
     /// Documents in the group sitting on a still-crawling connector.
     pub recrawl_risk: i64,
+    /// A generated title and summary, when one exists. Filled in by the route
+    /// layer, so this module stays unaware of the LLM subsystem and a
+    /// deployment with no model configured sees exactly today's behaviour.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub narration: Option<crate::services::narrate::NarrationView>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -172,6 +177,7 @@ pub async fn overview(state: &AppState) -> Result<OverviewResponse, AppError> {
                 chunks: r.try_get_i64("chunks"),
                 mean_confidence: r.try_get_f64("mean_confidence"),
                 recrawl_risk: r.try_get_i64("recrawl_risk"),
+                narration: None,
             }
         })
         .collect();
@@ -660,6 +666,9 @@ pub struct Cluster {
     pub members: Vec<ClusterMember>,
     /// Which rule chose the keeper, in words.
     pub keeper_reason: String,
+    /// A generated title and summary, when one exists. See [`Bundle`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub narration: Option<crate::services::narrate::NarrationView>,
 }
 
 /// Duplicate clusters, keeper first.
@@ -737,6 +746,7 @@ pub async fn clusters(
                     "url" => "shortest URL among documents sharing a canonical URL".into(),
                     _ => "shortest URL among documents with identical content".into(),
                 },
+                narration: None,
             }),
         }
     }

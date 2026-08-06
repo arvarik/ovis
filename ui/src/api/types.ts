@@ -719,6 +719,7 @@ export interface PruneBundle {
   chunks: number;
   mean_confidence: number;
   recrawl_risk: number;
+  narration?: Narration;
 }
 
 export interface PruneConnectorBundle {
@@ -831,6 +832,31 @@ export interface PruneCluster {
   size: number;
   members: PruneClusterMember[];
   keeper_reason: string;
+  narration?: Narration;
+}
+
+/**
+ * A generated title and summary.
+ *
+ * Absent, not empty, when nothing has been generated — a card must be able to
+ * tell "not narrated" from "narrated, and the model had nothing to say", and
+ * the two look identical if this is an empty string.
+ */
+export interface Narration {
+  subject_key: string;
+  title: string;
+  summary: string;
+  model: string;
+  generated_at: string;
+}
+
+export interface NarrateResponse {
+  subject_kind: string;
+  eligible: number;
+  already_current: number;
+  narrated: Narration[];
+  failed: { subject_key: string; reason: string }[];
+  model: string;
 }
 
 export interface PruneSamplePlan {

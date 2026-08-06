@@ -386,6 +386,14 @@ async fn reseed(pool: &sqlx::PgPool) {
         // near-duplicate tests assert on how many were written.
         "prune_minhash_band",
         "prune_minhash",
+        // Generated titles are keyed by subject, so one left behind renames a
+        // cluster in the next test's assertions. The provider tables leak the
+        // same way and worse: a role assignment surviving from a dev session
+        // makes "no model is configured" tests exercise a live endpoint.
+        "llm_annotation",
+        "llm_role",
+        "llm_model",
+        "llm_provider",
     ] {
         let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))
             .execute(pool)
@@ -2303,6 +2311,56 @@ async fn clusters_return_the_whole_group_with_its_keeper() {
         .iter()
         .filter(|m| m["is_keeper"] == false)
         .all(|m| m["candidate_id"].is_i64()));
+}
+
+/// A deployment with no model configured must see exactly today's screen. The
+/// narration field is absent rather than present-and-empty, so the UI can tell
+/// "not narrated" from "narrated, and the model had nothing to say".
+#[tokio::test]
+async fn clusters_carry_no_narration_until_one_is_generated() {
+    let Some(h) = harness().await else {
+        return skip("clusters_carry_no_narration_until_one_is_generated");
+    };
+    run_scan(&h, json!({ "kind": "all" }), json!(["exact_duplicate"])).await;
+
+    let body = get(&h.app, "/api/v1/prune/clusters?method=hash&limit=10")
+        .await
+        .json();
+    let clusters = body["items"].as_array().unwrap();
+    assert!(!clusters.is_empty(), "{body}");
+    for cluster in clusters {
+        assert!(
+            cluster.get("narration").is_none(),
+            "an unnarrated cluster must not carry the key at all: {cluster}"
+        );
+        // And the mechanical description it has today is untouched.
+        assert!(!cluster["keeper_reason"].as_str().unwrap().is_empty());
+    }
+
+    let overview = get(&h.app, "/api/v1/prune/overview").await.json();
+    for bundle in overview["bundles"].as_array().unwrap() {
+        assert!(bundle.get("narration").is_none(), "{bundle}");
+        assert!(!bundle["description"].as_str().unwrap().is_empty());
+    }
+}
+
+/// Pressing the button with nothing assigned has to say what to do about it,
+/// not fail with a lookup error from three layers down.
+#[tokio::test]
+async fn narrating_without_an_assigned_model_says_what_to_do() {
+    let Some(h) = harness().await else {
+        return skip("narrating_without_an_assigned_model_says_what_to_do");
+    };
+
+    let reply = post_json(
+        &h.app,
+        "/api/v1/prune/narrate",
+        json!({ "subject_kind": "cluster" }),
+    )
+    .await;
+    assert_eq!(reply.status, 400, "{}", reply.body);
+    assert!(reply.body.contains("narrate role"), "{}", reply.body);
+    assert!(reply.body.contains("Models page"), "{}", reply.body);
 }
 
 /// The sampling plan states, in words, what accepting the sample would mean.

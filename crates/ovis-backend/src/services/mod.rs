@@ -6,6 +6,7 @@
 
 pub mod connectors;
 pub mod llm;
+pub mod narrate;
 pub mod pages;
 pub mod prune;
 pub mod prune_reaper;

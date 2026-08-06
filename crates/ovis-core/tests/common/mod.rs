@@ -148,7 +148,11 @@ const SEEDED_TABLES: [&str; 13] = [
 /// state between tests. The trash in particular is keyed by document id, so a
 /// leftover snapshot makes the next test's counts wrong in a way that looks
 /// like a product bug.
-const OVIS_TABLES: [&str; 8] = [
+const OVIS_TABLES: [&str; 12] = [
+    "llm_annotation",
+    "llm_role",
+    "llm_model",
+    "llm_provider",
     "trash_document",
     "pending_index_restores",
     "pending_index_deletes",

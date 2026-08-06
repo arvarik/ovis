@@ -13,6 +13,7 @@
 //!    per-document delete/edit, which the Onyx API does not expose) and its own
 //!    `ovis` schema. Every connector/indexing action goes through the Onyx API.
 
+pub mod annotation;
 pub mod connectors;
 pub mod documents;
 pub mod indexing;

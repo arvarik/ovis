@@ -337,6 +337,13 @@ async fn reseed(pool: &sqlx::PgPool) {
         "prune_scan",
         "prune_exclusions",
         "prune_rules",
+        // Provider rows and role assignments survive a public reseed, and a
+        // role left over from a dev session makes a "nothing is configured"
+        // test call a live endpoint.
+        "llm_annotation",
+        "llm_role",
+        "llm_model",
+        "llm_provider",
     ] {
         // The tables may not exist yet on a fresh test database.
         let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))

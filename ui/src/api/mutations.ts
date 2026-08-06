@@ -33,6 +33,7 @@ import type {
   LlmProvider,
   LlmProbeResult,
   LlmRoles,
+  NarrateResponse,
 } from './types';
 import { count as formatCount } from '@/lib/format';
 
@@ -395,6 +396,40 @@ export function usePruneStage() {
       reportBulk(res, 'staged — hidden from search, data intact');
     },
     onError: (error) => pruneBulkErrorToast('Stage failed', error, queryClient),
+  });
+}
+
+/**
+ * Generate titles for clusters or bundles.
+ *
+ * Reports what a run actually did, including a partial one: a single endpoint
+ * hiccup should not discard the titles that did come back, so the response
+ * carries both lists and so does the toast.
+ */
+export function useNarrate() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (body: { subject_kind: 'cluster' | 'bundle'; method?: string; limit?: number }) =>
+      api.post<NarrateResponse>('/prune/narrate', body),
+    onSuccess: (res) => {
+      invalidatePrune(queryClient);
+      const model = res.model.split('/').pop() ?? res.model;
+      if (res.narrated.length === 0 && res.failed.length === 0) {
+        toast.info(
+          res.eligible === 0
+            ? 'Nothing to title yet'
+            : `All ${res.already_current} already titled by ${model}`,
+        );
+        return;
+      }
+      if (res.failed.length > 0) {
+        const why = res.failed[0]?.reason ?? 'no reason given';
+        toast.warning(`Titled ${res.narrated.length}, ${res.failed.length} failed: ${why}`);
+        return;
+      }
+      toast.success(`Titled ${res.narrated.length} with ${model}`);
+    },
+    onError: (error) => toast.error(`Could not generate titles: ${error.message}`),
   });
 }
 

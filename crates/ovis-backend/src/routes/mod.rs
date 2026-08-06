@@ -137,6 +137,7 @@ pub fn api_router(state: AppState) -> Router {
         .route("/prune/policies", get(prune::list_policies))
         .route("/prune/policies/commit", post(prune::commit_policy))
         .route("/prune/clusters", get(prune::clusters))
+        .route("/prune/narrate", post(prune::narrate_run))
         .route("/prune/sample", get(prune::sample))
         .route("/prune/trash", get(prune::trash_list))
         .route("/prune/trash/restore", post(prune::trash_restore))

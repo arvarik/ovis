@@ -181,7 +181,8 @@ pub async fn build_state(cfg: ServerConfig) -> anyhow::Result<AppState> {
     let pending_deletes_enabled = ovis_core::db::pending_deletes::ensure_table(&db).await;
     let prune_enabled = ovis_core::db::prune::ensure_tables(&db).await;
     let trash_enabled = ovis_core::db::trash::ensure_tables(&db).await;
-    let llm_enabled = ovis_core::db::llm::ensure_tables(&db).await;
+    let llm_enabled = ovis_core::db::llm::ensure_tables(&db).await
+        && ovis_core::db::annotation::ensure_tables(&db).await;
     if prune_enabled && !trash_enabled {
         tracing::error!(
             "pruning is enabled but ovis.trash_document could not be created; the reaper will \

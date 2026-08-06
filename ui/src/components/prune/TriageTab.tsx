@@ -28,6 +28,8 @@ import { Card } from '@/components/primitives/Card';
 import { EmptyState } from '@/components/primitives/EmptyState';
 import { Input } from '@/components/primitives/Input';
 import { Skeleton } from '@/components/primitives/Skeleton';
+import { NarrateButton } from '@/components/prune/NarrateButton';
+import { NarrationNote } from '@/components/prune/NarrationNote';
 import { count as formatCount } from '@/lib/format';
 
 type Tier = 'conservative' | 'standard' | 'aggressive';
@@ -98,12 +100,15 @@ export function TriageTab({ onOpenBundle }: { onOpenBundle: (bundle: PruneBundle
       <CorpusSummary data={data} />
 
       <section className="space-y-3">
-        <div>
-          <h2 className="font-display font-display-soft text-title text-ink">What the backlog is made of</h2>
-          <p className="mt-1 text-label text-ink-mute">
-            Groups, not rows. Open one to review it as a filtered list, or approve whole
-            duplicate clusters from the Clusters tab.
-          </p>
+        <div className="flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h2 className="font-display font-display-soft text-title text-ink">What the backlog is made of</h2>
+            <p className="mt-1 text-label text-ink-mute">
+              Groups, not rows. Open one to review it as a filtered list, or approve whole
+              duplicate clusters from the Clusters tab.
+            </p>
+          </div>
+          <NarrateButton subjectKind="bundle" disabled={data.bundles.length === 0} />
         </div>
         {data.bundles.length === 0 ? (
           <EmptyState
@@ -189,6 +194,10 @@ function BundleCard({ bundle, onOpen }: { bundle: PruneBundle; onOpen: () => voi
         </Badge>
       </div>
       <p className="text-caption text-ink-mute">{bundle.description}</p>
+      {/* Additive, never a replacement: the detector's own description above is
+          what was actually measured, and it stays whether or not a model has
+          had anything to say about the group. */}
+      {bundle.narration ? <NarrationNote narration={bundle.narration} /> : null}
       <div className="mt-auto flex items-end justify-between gap-2 pt-2">
         <div>
           <div className="font-display text-title text-ink tabular-nums">

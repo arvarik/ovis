@@ -21,6 +21,8 @@ import { EmptyState } from '@/components/primitives/EmptyState';
 import { Kbd } from '@/components/primitives/Kbd';
 import { Select } from '@/components/primitives/Select';
 import { Skeleton } from '@/components/primitives/Skeleton';
+import { NarrateButton } from '@/components/prune/NarrateButton';
+import { NarrationNote } from '@/components/prune/NarrationNote';
 import { count as formatCount } from '@/lib/format';
 
 export function ClustersTab() {
@@ -88,6 +90,7 @@ export function ClustersTab() {
               { value: 'url', label: 'Same canonical URL' },
             ]}
           />
+          <NarrateButton subjectKind="cluster" method={method} disabled={items.length === 0} />
         </div>
         <div className="flex items-center gap-2 text-caption text-ink-mute">
           <Kbd>j</Kbd> next <Kbd>k</Kbd> previous <Kbd>a</Kbd> stage the copies <Kbd>s</Kbd> skip
@@ -139,6 +142,7 @@ function ClusterCard({
 
   return (
     <Card className="space-y-4 p-4">
+      {cluster.narration ? <NarrationNote narration={cluster.narration} /> : null}
       {keeper ? (
         <div className="rounded-md border border-mint/40 bg-surface-2 p-3">
           <div className="flex items-center gap-2">
@@ -148,6 +152,30 @@ function ClusterCard({
           <div className="mt-1 break-all text-ink">{keeper.link ?? keeper.document_id}</div>
           <MemberMeta member={keeper} />
         </div>
+      ) : (
+        /* A document carries one group at a time, so a page that is both a
+           content duplicate and a URL variant appears in only one of the two
+           clusters — and the other is then left without the document it would
+           keep. Staging blind is exactly the mistake this screen exists to
+           prevent, so say so rather than showing an empty space. */
+        <div className="rounded-md border border-gold/40 bg-surface-2 p-3">
+          <div className="flex items-center gap-2">
+            <Badge tone="gold">no keeper shown</Badge>
+            <span className="text-caption text-ink-mute">{cluster.keeper_reason}</span>
+          </div>
+          <p className="mt-1 text-caption text-ink-mute">
+            The document this group would keep is not in this list — it is grouped under a
+            different cluster. Find it before staging these copies, or you may hide every
+            copy of the page.
+          </p>
+        </div>
+      )}
+
+      {cluster.members.length < cluster.size ? (
+        <p className="text-caption text-gold">
+          Showing {formatCount(cluster.members.length)} of {formatCount(cluster.size)}{' '}
+          documents in this group. The rest are grouped elsewhere.
+        </p>
       ) : null}
 
       <div>
@@ -166,7 +194,11 @@ function ClusterCard({
 
       <div className="flex flex-wrap items-center gap-2 border-t border-line pt-3">
         <Button onClick={onStage} disabled={staging || copies.length === 0}>
-          {staging ? 'Staging…' : `Stage ${formatCount(copies.length)} and keep 1`}
+          {staging
+            ? 'Staging…'
+            : keeper
+              ? `Stage ${formatCount(copies.length)} and keep 1`
+              : `Stage ${formatCount(copies.length)}`}
         </Button>
         <Button variant="secondary" onClick={onSkip}>
           Skip

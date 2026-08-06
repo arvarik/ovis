@@ -15,6 +15,7 @@ use serde::Deserialize;
 
 use crate::error::AppError;
 use crate::extract::{decode_path_id, Json, Query};
+use crate::services::narrate;
 use crate::services::pages as pages_service;
 use crate::services::prune as service;
 use crate::services::prune_triage as triage;
@@ -295,7 +296,50 @@ mod tests {
 // ---------------------------------------------------------------------------
 
 pub async fn overview(State(state): State<AppState>) -> Result<Response, AppError> {
-    Ok(axum::Json(triage::overview(&state).await?).into_response())
+    let mut overview = triage::overview(&state).await?;
+    attach_narrations(&state, "bundle", &mut overview.bundles, |b| &b.key, |b, n| {
+        b.narration = Some(n)
+    })
+    .await?;
+    Ok(axum::Json(overview).into_response())
+}
+
+/// Hang the newest generated title on each item, where one exists.
+///
+/// Done here rather than in the triage service so that module stays unaware of
+/// the LLM subsystem entirely: with no model configured, or with the annotation
+/// table absent, every item keeps exactly the mechanical description it has
+/// today. The feature degrades to the current behaviour, never to blank space.
+async fn attach_narrations<T>(
+    state: &AppState,
+    subject_kind: &str,
+    items: &mut [T],
+    key: impl Fn(&T) -> &String,
+    set: impl Fn(&mut T, narrate::NarrationView),
+) -> Result<(), AppError> {
+    let keys: Vec<String> = items.iter().map(|i| key(i).clone()).collect();
+    let found = narrate::newest_for(state, subject_kind, &keys).await?;
+    if found.is_empty() {
+        return Ok(());
+    }
+    let by_key: std::collections::HashMap<&str, &narrate::NarrationView> = found
+        .iter()
+        .map(|n| (n.subject_key.as_str(), n))
+        .collect();
+    for item in items.iter_mut() {
+        if let Some(found) = by_key.get(key(item).as_str()).copied().cloned() {
+            set(item, found);
+        }
+    }
+    Ok(())
+}
+
+/// Generate titles for clusters or bundles.
+pub async fn narrate_run(
+    State(state): State<AppState>,
+    axum::Json(body): axum::Json<narrate::NarrateRequest>,
+) -> Result<Response, AppError> {
+    Ok(axum::Json(narrate::narrate(&state, body).await?).into_response())
 }
 
 #[derive(Debug, Deserialize, Default)]
@@ -358,6 +402,17 @@ pub async fn clusters(
         query.limit.unwrap_or(20),
     )
     .await?;
+    // Cluster keys carry their method, because a hash group and a URL group can
+    // share a key and mean different things.
+    let mut clusters = clusters;
+    let keys: Vec<String> = clusters
+        .iter()
+        .map(|c| format!("{}:{}", c.method, c.key))
+        .collect();
+    let found = narrate::newest_for(&state, "cluster", &keys).await?;
+    for (cluster, key) in clusters.iter_mut().zip(keys) {
+        cluster.narration = found.iter().find(|n| n.subject_key == key).cloned();
+    }
     Ok(axum::Json(serde_json::json!({ "items": clusters })).into_response())
 }
 
