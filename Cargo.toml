@@ -43,7 +43,7 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 metrics = "0.24"
-metrics-exporter-prometheus = { version = "0.17", default-features = false }
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 
 # --- http server ---
 axum = { version = "0.8", features = ["macros"] }
