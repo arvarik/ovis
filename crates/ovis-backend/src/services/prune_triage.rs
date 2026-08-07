@@ -19,8 +19,8 @@
 
 use ovis_core::api_types::PruneReason;
 use ovis_core::db::documents;
-use ovis_core::db::prune as db;
 use ovis_core::db::profile::{self as profile_db, Band, Policy};
+use ovis_core::db::prune as db;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use sha2::{Digest, Sha256};
@@ -245,7 +245,9 @@ pub async fn overview(state: &AppState) -> Result<OverviewResponse, AppError> {
                 mean_confidence: r.try_get_f64("mean_confidence"),
             })
             .collect(),
-        trash: ovis_core::db::trash::counts(&state.db).await.unwrap_or_default(),
+        trash: ovis_core::db::trash::counts(&state.db)
+            .await
+            .unwrap_or_default(),
     })
 }
 
@@ -274,7 +276,10 @@ impl RowExt for sqlx::postgres::PgRow {
     }
     fn try_get_i64(&self, name: &str) -> i64 {
         use sqlx::Row;
-        self.try_get::<Option<i64>, _>(name).ok().flatten().unwrap_or(0)
+        self.try_get::<Option<i64>, _>(name)
+            .ok()
+            .flatten()
+            .unwrap_or(0)
     }
     fn try_get_i32(&self, name: &str) -> Option<i32> {
         use sqlx::Row;
@@ -282,7 +287,10 @@ impl RowExt for sqlx::postgres::PgRow {
     }
     fn try_get_f64(&self, name: &str) -> f64 {
         use sqlx::Row;
-        self.try_get::<Option<f64>, _>(name).ok().flatten().unwrap_or(0.0)
+        self.try_get::<Option<f64>, _>(name)
+            .ok()
+            .flatten()
+            .unwrap_or(0.0)
     }
     fn try_get_string(&self, name: &str) -> Option<String> {
         use sqlx::Row;
@@ -574,8 +582,8 @@ pub async fn commit(state: &AppState, request: CommitRequest) -> Result<CommitRe
     let mut cursor: Option<String> = None;
 
     loop {
-        let ids =
-            profile_db::documents_in_band(&state.db, &policy, band, cursor.as_deref(), 1000).await?;
+        let ids = profile_db::documents_in_band(&state.db, &policy, band, cursor.as_deref(), 1000)
+            .await?;
         if ids.is_empty() {
             break;
         }
@@ -838,9 +846,17 @@ pub async fn sample(
                 .push_bind(json!([{ "code": code }]));
         }
     }
-    let population: i64 = count_qb.build_query_scalar().fetch_one(&state.db).await.map_err(|e| AppError::Database(e.to_string()))?;
+    let population: i64 = count_qb
+        .build_query_scalar()
+        .fetch_one(&state.db)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
     qb.push(" ORDER BY random() LIMIT ").push_bind(n);
-    let ids: Vec<String> = qb.build_query_scalar().fetch_all(&state.db).await.map_err(|e| AppError::Database(e.to_string()))?;
+    let ids: Vec<String> = qb
+        .build_query_scalar()
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| AppError::Database(e.to_string()))?;
 
     let sample_size = ids.len() as i64;
     let confidence: f64 = 0.95;

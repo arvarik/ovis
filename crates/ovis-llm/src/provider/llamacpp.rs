@@ -64,10 +64,7 @@ pub(super) async fn list_models(provider: &Provider) -> CoreResult<Vec<ModelInfo
                 id: raw.to_string(),
                 display_name: Some(display),
                 advertised: AdvertisedMetadata {
-                    context_tokens: m
-                        .get("n_ctx")
-                        .and_then(Value::as_u64)
-                        .map(|v| v as u32),
+                    context_tokens: m.get("n_ctx").and_then(Value::as_u64).map(|v| v as u32),
                     // llama.cpp reports `capabilities: ["completion"]` and
                     // nothing else. Everything meaningful comes from the probe.
                     ..AdvertisedMetadata::default()
@@ -112,7 +109,12 @@ pub(super) async fn complete(
     }
 
     let response = send_json(
-        provider.authed(provider.http().post(provider.url("/completion")).json(&body)),
+        provider.authed(
+            provider
+                .http()
+                .post(provider.url("/completion"))
+                .json(&body),
+        ),
         "completion",
     )
     .await?;
@@ -220,7 +222,10 @@ mod tests {
                 // Assert the two llama.cpp-specific affordances are present.
                 assert_eq!(body["grammar"], r#"root ::= ("yes" | "no")"#);
                 assert!(
-                    body["prompt"].as_str().unwrap().ends_with(FINAL_CHANNEL_PREFILL),
+                    body["prompt"]
+                        .as_str()
+                        .unwrap()
+                        .ends_with(FINAL_CHANNEL_PREFILL),
                     "the assistant turn must be prefilled past the channel"
                 );
                 wiremock::ResponseTemplate::new(200)
@@ -263,9 +268,12 @@ mod tests {
                 .mount(&server)
                 .await;
 
-            let provider =
-                Provider::new(ProviderKind::LlamaCpp, Some(&server.uri()), key.map(String::from))
-                    .unwrap();
+            let provider = Provider::new(
+                ProviderKind::LlamaCpp,
+                Some(&server.uri()),
+                key.map(String::from),
+            )
+            .unwrap();
             provider.list_models().await.unwrap();
         }
     }
@@ -288,7 +296,10 @@ mod tests {
         let provider = Provider::new(ProviderKind::LlamaCpp, Some(&server.uri()), None).unwrap();
         let models = provider.list_models().await.unwrap();
         assert_eq!(models.len(), 1);
-        assert_eq!(models[0].display_name.as_deref(), Some("gemma-4-12B-it-Q5_K_M"));
+        assert_eq!(
+            models[0].display_name.as_deref(),
+            Some("gemma-4-12B-it-Q5_K_M")
+        );
         assert!(models[0].id.starts_with("/models/"));
     }
 }

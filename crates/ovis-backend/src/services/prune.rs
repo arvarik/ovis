@@ -147,16 +147,17 @@ fn rule_spec(rule: &PruneRuleItem) -> Result<CompiledRule, AppError> {
         .body
         .get("pattern")
         .and_then(Value::as_str)
-        .ok_or_else(|| {
-            AppError::BadRequest(format!("rule '{}' has no pattern", rule.name))
-        })?;
+        .ok_or_else(|| AppError::BadRequest(format!("rule '{}' has no pattern", rule.name)))?;
     let confidence = rule
         .body
         .get("confidence")
         .and_then(Value::as_f64)
         .unwrap_or(0.8) as f32;
     let regex = regex::Regex::new(pattern).map_err(|e| {
-        AppError::BadRequest(format!("rule '{}' pattern does not compile: {e}", rule.name))
+        AppError::BadRequest(format!(
+            "rule '{}' pattern does not compile: {e}",
+            rule.name
+        ))
     })?;
     Ok(CompiledRule {
         name: rule.name.clone(),
@@ -175,10 +176,13 @@ pub async fn effective_config(
     let rules = db::list_rules(&state.db).await?;
 
     let mut config = PruneConfig::default();
-    for rule in rules.iter().filter(|r| r.kind == "detector_config" && r.enabled) {
-        config = config
-            .with_overrides(&rule.body)
-            .map_err(|e| AppError::BadRequest(format!("stored detector config '{}': {e}", rule.name)))?;
+    for rule in rules
+        .iter()
+        .filter(|r| r.kind == "detector_config" && r.enabled)
+    {
+        config = config.with_overrides(&rule.body).map_err(|e| {
+            AppError::BadRequest(format!("stored detector config '{}': {e}", rule.name))
+        })?;
     }
     if let Some(overrides) = overrides {
         config = config
@@ -239,7 +243,9 @@ pub async fn status(state: &AppState) -> Result<PruneStatusResponse, AppError> {
             deleted_last_hour: counts.deleted_last_hour,
         },
         active_scan,
-        trash: ovis_core::db::trash::counts(&state.db).await.unwrap_or_default(),
+        trash: ovis_core::db::trash::counts(&state.db)
+            .await
+            .unwrap_or_default(),
         limits: PruneLimits {
             grace_days: state.cfg.prune_grace_days,
             big_batch: state.cfg.prune_big_batch,
@@ -472,7 +478,11 @@ fn bulk_failure(row: &PruneCandidateItem, code: &str) -> PruneBulkFailure {
 /// Set a document's `hidden` flag through the trusted path: the Onyx API when
 /// configured (Onyx syncs its own index), direct SQL + index flag sync
 /// otherwise. Returns which path ran.
-pub async fn set_hidden(state: &AppState, id: &str, hidden: bool) -> Result<&'static str, AppError> {
+pub async fn set_hidden(
+    state: &AppState,
+    id: &str,
+    hidden: bool,
+) -> Result<&'static str, AppError> {
     if let Some(onyx) = state.onyx.as_ref() {
         onyx.set_doc_hidden(id, hidden).await?;
         Ok("onyx_api")
@@ -530,9 +540,14 @@ pub async fn stage_one(
 
     let via = set_hidden(state, &row.document_id, true).await?;
 
-    let deadline =
-        db::mark_staged(&state.db, row.id, prev_hidden, state.cfg.prune_grace_days, staged_by)
-            .await?;
+    let deadline = db::mark_staged(
+        &state.db,
+        row.id,
+        prev_hidden,
+        state.cfg.prune_grace_days,
+        staged_by,
+    )
+    .await?;
     let Some(expires_at) = deadline else {
         // Lost a race: someone else moved this row while we were hiding. If
         // the row is no longer headed for deletion and the document was
@@ -589,7 +604,8 @@ pub async fn stage(
             Ok((via, prev_hidden, expires_at)) => {
                 changed += 1;
                 via_seen = Some(via.to_string());
-                latest_deadline = Some(latest_deadline.map_or(expires_at, |d: DateTime<Utc>| d.max(expires_at)));
+                latest_deadline =
+                    Some(latest_deadline.map_or(expires_at, |d: DateTime<Utc>| d.max(expires_at)));
                 db::audit(
                     &state.db,
                     who,
@@ -798,7 +814,8 @@ pub async fn schedule_delete(
                     let _ = db::set_remember(&state.db, row.id, remember).await;
                     changed += 1;
                     via_seen = Some(via.to_string());
-                    latest_deadline = Some(latest_deadline.map_or(expires_at, |d| d.max(expires_at)));
+                    latest_deadline =
+                        Some(latest_deadline.map_or(expires_at, |d| d.max(expires_at)));
                     db::audit(
                         &state.db,
                         who,
@@ -998,7 +1015,16 @@ pub async fn cancel_scan(state: &AppState, id: i64) -> Result<PruneScanItem, App
     let existing = get_scan(state, id).await?;
     match db::scan_cancel(&state.db, id).await? {
         Some(_) => {
-            db::audit(&state.db, actor(state), "scan_cancelled", None, Some(id), None, None).await;
+            db::audit(
+                &state.db,
+                actor(state),
+                "scan_cancelled",
+                None,
+                Some(id),
+                None,
+                None,
+            )
+            .await;
             get_scan(state, id).await
         }
         None => Err(AppError::Conflict(format!(
@@ -1088,9 +1114,9 @@ fn validate_rule_body(kind: &str, body: &Value) -> Result<(), AppError> {
             regex::Regex::new(pattern)
                 .map_err(|e| AppError::BadRequest(format!("pattern does not compile: {e}")))?;
             if let Some(confidence) = body.get("confidence") {
-                let c = confidence.as_f64().ok_or_else(|| {
-                    AppError::BadRequest("confidence must be a number".into())
-                })?;
+                let c = confidence
+                    .as_f64()
+                    .ok_or_else(|| AppError::BadRequest("confidence must be a number".into()))?;
                 if !(0.0..=1.0).contains(&c) {
                     return Err(AppError::BadRequest(
                         "confidence must be between 0 and 1".into(),
@@ -1127,8 +1153,14 @@ pub async fn create_rule(
         return Err(AppError::BadRequest("rule name must not be empty".into()));
     }
     validate_rule_body(&request.kind, &request.body)?;
-    let rule = db::create_rule(&state.db, name, &request.kind, &request.body, request.enabled)
-        .await?;
+    let rule = db::create_rule(
+        &state.db,
+        name,
+        &request.kind,
+        &request.body,
+        request.enabled,
+    )
+    .await?;
     db::audit(
         &state.db,
         actor(state),
@@ -1345,12 +1377,11 @@ async fn preview_tag_rule(
 
     // Tag rules match against the (bounded) tag vocabulary, then count the
     // documents carrying any matched tag — far cheaper than walking documents.
-    let tags: Vec<(i32, String, String)> = sqlx::query_as(
-        "SELECT id, tag_key, tag_value FROM public.tag ORDER BY id LIMIT 100000",
-    )
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| AppError::Database(e.to_string()))?;
+    let tags: Vec<(i32, String, String)> =
+        sqlx::query_as("SELECT id, tag_key, tag_value FROM public.tag ORDER BY id LIMIT 100000")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|e| AppError::Database(e.to_string()))?;
 
     let scanned = tags.len() as i64;
     let matched_ids: Vec<i32> = tags
@@ -1400,11 +1431,13 @@ async fn preview_tag_rule(
         complete: scanned < 100_000,
         sample: rows
             .into_iter()
-            .map(|(document_id, semantic_id, key, value)| PruneRulePreviewMatch {
-                document_id,
-                semantic_id,
-                matched_on: format!("{key}={value}"),
-            })
+            .map(
+                |(document_id, semantic_id, key, value)| PruneRulePreviewMatch {
+                    document_id,
+                    semantic_id,
+                    matched_on: format!("{key}={value}"),
+                },
+            )
             .collect(),
     })
 }
@@ -1430,11 +1463,17 @@ mod tests {
 
     #[test]
     fn rule_bodies_are_validated_per_kind() {
-        assert!(validate_rule_body("url_rule", &json!({"pattern": "/tag/", "confidence": 0.8})).is_ok());
+        assert!(
+            validate_rule_body("url_rule", &json!({"pattern": "/tag/", "confidence": 0.8})).is_ok()
+        );
         assert!(validate_rule_body("url_rule", &json!({"pattern": "("})).is_err());
         assert!(validate_rule_body("url_rule", &json!({})).is_err());
-        assert!(validate_rule_body("url_rule", &json!({"pattern": "x", "confidence": 1.5})).is_err());
-        assert!(validate_rule_body("detector_config", &json!({"thin": {"min_age_days": 3}})).is_ok());
+        assert!(
+            validate_rule_body("url_rule", &json!({"pattern": "x", "confidence": 1.5})).is_err()
+        );
+        assert!(
+            validate_rule_body("detector_config", &json!({"thin": {"min_age_days": 3}})).is_ok()
+        );
         assert!(validate_rule_body("detector_config", &json!({"thn": {}})).is_err());
         assert!(validate_rule_body("nonsense", &json!({})).is_err());
     }

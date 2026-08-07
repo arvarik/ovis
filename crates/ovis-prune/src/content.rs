@@ -226,8 +226,7 @@ mod tests {
 
     #[test]
     fn mixed_language_documents_carry_the_split() {
-        let verdict =
-            detect_language(&[ENGLISH, GERMAN], &config()).expect("confident detection");
+        let verdict = detect_language(&[ENGLISH, GERMAN], &config()).expect("confident detection");
         assert!(
             verdict.mixed_with.is_some(),
             "chunk disagreement must be surfaced: {verdict:?}"

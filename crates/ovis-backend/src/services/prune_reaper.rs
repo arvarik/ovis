@@ -41,12 +41,15 @@ pub fn spawn_reaper(state: AppState) {
         loop {
             ticker.tick().await;
             state.prune.update_reaper(|s| {
-                s.next_run_at = Some(Utc::now() + ChronoDuration::seconds(interval.as_secs() as i64));
+                s.next_run_at =
+                    Some(Utc::now() + ChronoDuration::seconds(interval.as_secs() as i64));
             });
             if let Err(err) = run_cycle(&state).await {
                 tracing::error!(error = %err.log_detail(), "reaper cycle failed");
             }
-            state.prune.update_reaper(|s| s.last_run_at = Some(Utc::now()));
+            state
+                .prune
+                .update_reaper(|s| s.last_run_at = Some(Utc::now()));
         }
     });
 }
@@ -79,7 +82,9 @@ pub async fn run_cycle(state: &AppState) -> Result<CycleReport, AppError> {
                 tracing::warn!(reason, "reaper halted");
             }
             let reason = reason.clone();
-            state.prune.update_reaper(move |s| s.halted_reason = Some(reason));
+            state
+                .prune
+                .update_reaper(move |s| s.halted_reason = Some(reason));
             report.halted = true;
             update_metrics(state, &report).await;
             return Ok(report);
@@ -523,25 +528,28 @@ async fn trash_delete(
     )
     .await?;
 
-    let (chunks_deleted, index_cleanup_pending) =
-        match state.os.delete_document_chunks(index, &row.document_id).await {
-            Ok(n) => (n, false),
-            Err(err) => {
-                tracing::warn!(
-                    document_id = %row.document_id,
-                    error = %err,
-                    "document trashed and removed from Postgres, but index cleanup failed; \
-                     queued for retry"
-                );
-                let _ = ovis_core::db::pending_deletes::enqueue(
-                    &state.db,
-                    &row.document_id,
-                    &err.to_string(),
-                )
-                .await;
-                (0, true)
-            }
-        };
+    let (chunks_deleted, index_cleanup_pending) = match state
+        .os
+        .delete_document_chunks(index, &row.document_id)
+        .await
+    {
+        Ok(n) => (n, false),
+        Err(err) => {
+            tracing::warn!(
+                document_id = %row.document_id,
+                error = %err,
+                "document trashed and removed from Postgres, but index cleanup failed; \
+                 queued for retry"
+            );
+            let _ = ovis_core::db::pending_deletes::enqueue(
+                &state.db,
+                &row.document_id,
+                &err.to_string(),
+            )
+            .await;
+            (0, true)
+        }
+    };
 
     Ok(TrashedOutcome {
         chunks_deleted,
@@ -625,8 +633,7 @@ async fn restage_recrawled(state: &AppState, report: &mut CycleReport) -> Result
             reasons: vec![PruneReason {
                 detector: "recrawl".into(),
                 code: "recrawled_after_prune".into(),
-                detail: "previously pruned with remember=true; the crawler brought it back"
-                    .into(),
+                detail: "previously pruned with remember=true; the crawler brought it back".into(),
                 confidence: 1.0,
                 evidence: json!({ "exclusion_reason": "deleted_with_remember" }),
             }],

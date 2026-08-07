@@ -64,9 +64,14 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          components: clippy
+          components: clippy, rustfmt
 
       - uses: Swatinem/rust-cache@v2
+
+      # First, because it needs no build and a formatting failure is the
+      # cheapest one to report.
+      - name: fmt
+        run: cargo fmt --all --check
 
       # The captured production Onyx schema, not a hand-written approximation:
       # that is what makes these tests evidence about production.

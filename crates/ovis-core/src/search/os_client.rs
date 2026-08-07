@@ -361,7 +361,10 @@ impl OsClient {
                 )
                 .await?;
 
-            let responses = response["responses"].as_array().cloned().unwrap_or_default();
+            let responses = response["responses"]
+                .as_array()
+                .cloned()
+                .unwrap_or_default();
             if responses.len() != batch.len() {
                 return Err(CoreError::search(format!(
                     "batch fetch document chunks: asked for {} documents, got {} responses",
@@ -424,7 +427,10 @@ impl OsClient {
             .await?;
 
         let total = response["hits"]["total"]["value"].as_i64().unwrap_or(0);
-        let hits = response["hits"]["hits"].as_array().cloned().unwrap_or_default();
+        let hits = response["hits"]["hits"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
         let items: Vec<(String, Value)> = hits
             .iter()
             .map(|hit| {
@@ -451,7 +457,11 @@ impl OsClient {
     /// Uses `_bulk` with `index` (not `create`) actions so a restore is
     /// idempotent: replaying it over chunks that already came back overwrites
     /// them rather than erroring out halfway through.
-    pub async fn bulk_index_chunks(&self, index: &str, chunks: &[(String, Value)]) -> CoreResult<u64> {
+    pub async fn bulk_index_chunks(
+        &self,
+        index: &str,
+        chunks: &[(String, Value)],
+    ) -> CoreResult<u64> {
         if chunks.is_empty() {
             return Ok(0);
         }
@@ -495,7 +505,10 @@ impl OsClient {
                     truncate(first, 300)
                 )));
             }
-            indexed += response["items"].as_array().map(|i| i.len() as u64).unwrap_or(0);
+            indexed += response["items"]
+                .as_array()
+                .map(|i| i.len() as u64)
+                .unwrap_or(0);
         }
         Ok(indexed)
     }

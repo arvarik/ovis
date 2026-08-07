@@ -175,7 +175,11 @@ async fn a_trashed_document_disappears_from_onyx_and_comes_back_identical() {
     assert_eq!(snapshot.chunk_count(), 3, "every chunk must be captured");
     assert!(snapshot.vectors_included);
     assert_eq!(snapshot.tags.len(), 1, "tags must be captured");
-    assert_eq!(snapshot.cc_pairs.len(), 1, "connector attribution must be captured");
+    assert_eq!(
+        snapshot.cc_pairs.len(),
+        1,
+        "connector attribution must be captured"
+    );
 
     trash::trash_and_delete(
         &db,
@@ -418,7 +422,9 @@ async fn retention_purges_only_expired_unheld_snapshots() {
     for (suffix, retention) in [("expired", 1), ("fresh", 30), ("held", 1)] {
         let doc_id = format!("https://example.com/trash-{suffix}");
         seed_document(&db, &doc_id).await;
-        let snapshot = trash::capture(&db, &os, INDEX, &doc_id, false).await.unwrap();
+        let snapshot = trash::capture(&db, &os, INDEX, &doc_id, false)
+            .await
+            .unwrap();
         trash::trash_and_delete(&db, &snapshot, &TrashProvenance::default(), retention)
             .await
             .unwrap();

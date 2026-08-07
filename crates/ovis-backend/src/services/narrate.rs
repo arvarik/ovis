@@ -185,8 +185,7 @@ pub async fn narrate(
         .await?
         .ok_or_else(|| {
             AppError::BadRequest(
-                "no model is assigned to the narrate role; assign one on the Models page"
-                    .into(),
+                "no model is assigned to the narrate role; assign one on the Models page".into(),
             )
         })?;
     let provider_row = ovis_core::db::llm::get_provider(&state.db, assigned.provider_id)
@@ -217,9 +216,7 @@ pub async fn narrate(
     })?;
     let instruction = kind.instruction();
     let subjects = match kind {
-        SubjectKind::Cluster => {
-            cluster_subjects(state, request.method.as_deref(), limit).await?
-        }
+        SubjectKind::Cluster => cluster_subjects(state, request.method.as_deref(), limit).await?,
         SubjectKind::Bundle => bundle_subjects(state).await?,
     };
 
@@ -236,7 +233,11 @@ pub async fn narrate(
 
     let mut narrated = Vec::new();
     let mut failed = Vec::new();
-    for subject in subjects.iter().filter(|s| todo.contains(&s.key)).take(limit as usize) {
+    for subject in subjects
+        .iter()
+        .filter(|s| todo.contains(&s.key))
+        .take(limit as usize)
+    {
         match narrator.narrate(instruction, &subject.evidence).await {
             Ok(out) => {
                 let stored = db::record(
@@ -426,9 +427,8 @@ mod tests {
         ] {
             let needle = format!("{a}{b}");
             for (n, line) in source.lines().enumerate() {
-                let mutates = line.contains("INSERT")
-                    || line.contains("UPDATE")
-                    || line.contains("DELETE");
+                let mutates =
+                    line.contains("INSERT") || line.contains("UPDATE") || line.contains("DELETE");
                 assert!(
                     !(mutates && line.contains(&needle)),
                     "line {} writes {needle}: {line}",

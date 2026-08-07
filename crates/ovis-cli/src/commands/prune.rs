@@ -9,10 +9,10 @@
 //! and `--now` does not exist.
 
 use ovis_core::api_types::{
-    PruneBulkResponse, PruneCandidateFilterBody, PruneCandidateItem,
-    PruneDismissRequest, PruneReason, PruneRestoreRequest, PruneRuleCreate, PruneRuleItem,
-    PruneRulePatch, PruneScanItem, PruneScanRequest, PruneScheduleDeleteRequest, PruneScope,
-    PruneStageRequest, PruneStatusResponse,
+    PruneBulkResponse, PruneCandidateFilterBody, PruneCandidateItem, PruneDismissRequest,
+    PruneReason, PruneRestoreRequest, PruneRuleCreate, PruneRuleItem, PruneRulePatch,
+    PruneScanItem, PruneScanRequest, PruneScheduleDeleteRequest, PruneScope, PruneStageRequest,
+    PruneStatusResponse,
 };
 
 use crate::api::QueryBuilder;
@@ -83,8 +83,10 @@ pub async fn scan(ctx: &Ctx, args: &PruneScanArgs) -> CliResult<()> {
         if ctx.out.format != Format::Table {
             emit_scan(ctx, &scan)?;
         } else {
-            ctx.out
-                .footer(format!("follow: ovis prune scans · results: ovis prune ls --scan {}", scan.id));
+            ctx.out.footer(format!(
+                "follow: ovis prune scans · results: ovis prune ls --scan {}",
+                scan.id
+            ));
         }
         return Ok(());
     }
@@ -147,7 +149,10 @@ fn emit_scan(ctx: &Ctx, scan: &PruneScanItem) -> CliResult<()> {
             ]);
             grid.push(vec![
                 GridCell::plain("status"),
-                GridCell::toned(&scan.status, crate::output::style::status_tone(&scan.status)),
+                GridCell::toned(
+                    &scan.status,
+                    crate::output::style::status_tone(&scan.status),
+                ),
             ]);
             grid.push(vec![
                 GridCell::plain("examined"),
@@ -199,9 +204,17 @@ pub async fn scans(ctx: &Ctx, limit: Option<i64>, page: Option<i64>) -> CliResul
         Format::Table | Format::Csv => {
             let relative = ctx.relative_time();
             let mut grid = Grid::new(
-                ["id", "status", "scope", "detectors", "examined", "found", "started"]
-                    .map(String::from)
-                    .to_vec(),
+                [
+                    "id",
+                    "status",
+                    "scope",
+                    "detectors",
+                    "examined",
+                    "found",
+                    "started",
+                ]
+                .map(String::from)
+                .to_vec(),
             );
             for scan in &response.items {
                 let found = scan
@@ -211,7 +224,10 @@ pub async fn scans(ctx: &Ctx, limit: Option<i64>, page: Option<i64>) -> CliResul
                     .unwrap_or(0);
                 grid.push(vec![
                     GridCell::plain(scan.id.to_string()),
-                    GridCell::toned(&scan.status, crate::output::style::status_tone(&scan.status)),
+                    GridCell::toned(
+                        &scan.status,
+                        crate::output::style::status_tone(&scan.status),
+                    ),
                     GridCell::plain(describe_scope(&scan.scope)),
                     GridCell::plain(scan.detectors.join(",")),
                     GridCell::plain(thousands(scan.examined)),
@@ -220,7 +236,8 @@ pub async fn scans(ctx: &Ctx, limit: Option<i64>, page: Option<i64>) -> CliResul
                 ]);
             }
             ctx.out.grid(&grid)?;
-            ctx.out.footer(format!("{} scans", thousands(response.total)));
+            ctx.out
+                .footer(format!("{} scans", thousands(response.total)));
         }
     }
     Ok(())
@@ -486,7 +503,10 @@ pub async fn show(ctx: &Ctx, reference: &str) -> CliResult<()> {
         "state",
         GridCell::toned(&item.state, crate::output::style::status_tone(&item.state)),
     );
-    push("confidence", GridCell::plain(format!("{:.2}", item.confidence)));
+    push(
+        "confidence",
+        GridCell::plain(format!("{:.2}", item.confidence)),
+    );
     push(
         "connector",
         GridCell::plain(item.connector_name.as_deref().unwrap_or("—")),
@@ -510,7 +530,10 @@ pub async fn show(ctx: &Ctx, reference: &str) -> CliResult<()> {
         push("document row", GridCell::toned("gone", Tone::Error));
     }
     if let Some(hidden) = item.hidden {
-        push("hidden now", GridCell::plain(if hidden { "yes" } else { "no" }));
+        push(
+            "hidden now",
+            GridCell::plain(if hidden { "yes" } else { "no" }),
+        );
     }
     if let Some(staged_at) = &item.staged_at {
         push("staged", GridCell::plain(timestamp(staged_at, relative)));
@@ -548,11 +571,11 @@ pub async fn show(ctx: &Ctx, reference: &str) -> CliResult<()> {
 
     if let Some(pair) = &detail.pair {
         push("", GridCell::plain(""));
+        push("duplicate of", GridCell::toned(&pair.kept_id, Tone::Bold));
         push(
-            "duplicate of",
-            GridCell::toned(&pair.kept_id, Tone::Bold),
+            "similarity",
+            GridCell::plain(format!("{:.1}%", pair.similarity * 100.0)),
         );
-        push("similarity", GridCell::plain(format!("{:.1}%", pair.similarity * 100.0)));
         match &pair.kept {
             Some(kept) => {
                 push("keeper title", GridCell::plain(&kept.semantic_id));
@@ -582,9 +605,9 @@ pub async fn show(ctx: &Ctx, reference: &str) -> CliResult<()> {
             ));
         }
         match item.state.as_str() {
-            "candidate" => ctx.out.footer(
-                "stage: ovis prune stage @N · dismiss: ovis prune dismiss @N [--forever]",
-            ),
+            "candidate" => ctx
+                .out
+                .footer("stage: ovis prune stage @N · dismiss: ovis prune dismiss @N [--forever]"),
             "staged" => ctx
                 .out
                 .footer("restore: ovis prune restore @N · sooner: ovis prune delete @N"),
@@ -834,7 +857,12 @@ pub async fn stage(ctx: &Ctx, args: &PruneSelectorArgs) -> CliResult<()> {
             confirm_count: confirmed,
         })
         .await?;
-    report_bulk(ctx, status, &response, "staged (hidden from search, data intact)")?;
+    report_bulk(
+        ctx,
+        status,
+        &response,
+        "staged (hidden from search, data intact)",
+    )?;
     if matches!(ctx.out.format, Format::Table) {
         ctx.out
             .footer("watch: ovis prune staged · undo: ovis prune restore @N");
@@ -884,7 +912,12 @@ pub async fn restore(ctx: &Ctx, references: &[String], all_staged: bool) -> CliR
 
     // Restore is the safe direction: no confirmation.
     let (status, response) = ctx.api.prune_restore(&request).await?;
-    report_bulk(ctx, status, &response, "restored (exactly as before staging)")
+    report_bulk(
+        ctx,
+        status,
+        &response,
+        "restored (exactly as before staging)",
+    )
 }
 
 pub async fn delete(ctx: &Ctx, args: &PruneDeleteArgs) -> CliResult<()> {
@@ -966,7 +999,10 @@ fn render_status(ctx: &Ctx, status: &PruneStatusResponse) -> CliResult<()> {
     let mut grid = Grid::new(vec!["field".into(), "value".into()]);
     let mut push = |k: &str, cell: GridCell| grid.push(vec![GridCell::plain(k), cell]);
 
-    push("candidates open", GridCell::plain(thousands(status.candidates)));
+    push(
+        "candidates open",
+        GridCell::plain(thousands(status.candidates)),
+    );
     push(
         "staged",
         match status.soonest_expiry {
@@ -979,11 +1015,26 @@ fn render_status(ctx: &Ctx, status: &PruneStatusResponse) -> CliResult<()> {
         },
     );
     push("deleting now", GridCell::plain(thousands(status.deleting)));
-    push("deleted (7 days)", GridCell::plain(thousands(status.deleted_7d)));
-    push("deleted (total)", GridCell::plain(thousands(status.deleted_total)));
-    push("dismissed", GridCell::plain(thousands(status.dismissed_total)));
-    push("restored", GridCell::plain(thousands(status.restored_total)));
-    push("exclusion list", GridCell::plain(thousands(status.exclusions)));
+    push(
+        "deleted (7 days)",
+        GridCell::plain(thousands(status.deleted_7d)),
+    );
+    push(
+        "deleted (total)",
+        GridCell::plain(thousands(status.deleted_total)),
+    );
+    push(
+        "dismissed",
+        GridCell::plain(thousands(status.dismissed_total)),
+    );
+    push(
+        "restored",
+        GridCell::plain(thousands(status.restored_total)),
+    );
+    push(
+        "exclusion list",
+        GridCell::plain(thousands(status.exclusions)),
+    );
 
     let reaper = &status.reaper;
     let reaper_cell = if reaper.halted {
@@ -1143,7 +1194,9 @@ pub async fn exclusions(ctx: &Ctx, limit: Option<i64>, page: Option<i64>) -> Cli
         Format::Table | Format::Csv => {
             let relative = ctx.relative_time();
             let mut grid = Grid::new(
-                ["document", "reason", "note", "added"].map(String::from).to_vec(),
+                ["document", "reason", "note", "added"]
+                    .map(String::from)
+                    .to_vec(),
             );
             for item in &response.items {
                 grid.push(vec![
@@ -1209,7 +1262,11 @@ pub async fn rules(ctx: &Ctx, action: &PruneRulesCommand) -> CliResult<()> {
                     }
                     ctx.out.grid(&grid)?;
                     let scope_note = if preview.complete {
-                        format!("{} matched of {} scanned", preview.matched, thousands(preview.scanned))
+                        format!(
+                            "{} matched of {} scanned",
+                            preview.matched,
+                            thousands(preview.scanned)
+                        )
                     } else {
                         format!(
                             "≥{} matched in the first {} scanned (preview cap; a scan covers \
@@ -1310,7 +1367,11 @@ async fn set_rule_enabled(ctx: &Ctx, reference: &str, enabled: bool) -> CliResul
     ctx.out.note(format!(
         "rule '{}' is now {}",
         updated.name,
-        if updated.enabled { "enabled" } else { "disabled" }
+        if updated.enabled {
+            "enabled"
+        } else {
+            "disabled"
+        }
     ));
     Ok(())
 }
@@ -1326,9 +1387,8 @@ pub async fn config(ctx: &Ctx, action: &PruneConfigCommand) -> CliResult<()> {
             if file == "-" {
                 ctx.out.print(&yaml)?;
             } else {
-                std::fs::write(file, &yaml).map_err(|e| {
-                    CliError::Other(anyhow::anyhow!("cannot write {file}: {e}"))
-                })?;
+                std::fs::write(file, &yaml)
+                    .map_err(|e| CliError::Other(anyhow::anyhow!("cannot write {file}: {e}")))?;
                 ctx.out.note(format!("wrote the detector config to {file}"));
             }
             Ok(())
@@ -1340,9 +1400,8 @@ pub async fn config(ctx: &Ctx, action: &PruneConfigCommand) -> CliResult<()> {
                 std::io::stdin().read_to_string(&mut buffer)?;
                 buffer
             } else {
-                std::fs::read_to_string(file).map_err(|e| {
-                    CliError::Other(anyhow::anyhow!("cannot read {file}: {e}"))
-                })?
+                std::fs::read_to_string(file)
+                    .map_err(|e| CliError::Other(anyhow::anyhow!("cannot read {file}: {e}")))?
             };
             let rule = ctx.api.prune_config_import(&yaml).await?;
             ctx.out.note(format!(

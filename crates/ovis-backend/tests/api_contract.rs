@@ -62,7 +62,6 @@ impl DbLock {
     }
 }
 
-
 struct Harness {
     app: axum::Router,
     state: AppState,

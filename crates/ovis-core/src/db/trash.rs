@@ -121,7 +121,9 @@ impl Snapshot {
     /// Approximate serialized size, reported to the UI so "how much is in the
     /// trash" is a real number rather than a row count.
     pub fn byte_size(&self) -> i64 {
-        serde_json::to_vec(self).map(|v| v.len() as i64).unwrap_or(0)
+        serde_json::to_vec(self)
+            .map(|v| v.len() as i64)
+            .unwrap_or(0)
     }
 
     pub fn semantic_id(&self) -> Option<String> {
@@ -170,12 +172,11 @@ pub async fn capture(
     .await?;
     let tags: Vec<Value> = tag_rows.iter().map(row_to_json).collect();
 
-    let cc_rows = sqlx::query(
-        "SELECT * FROM public.document_by_connector_credential_pair WHERE id = $1",
-    )
-    .bind(document_id)
-    .fetch_all(pool)
-    .await?;
+    let cc_rows =
+        sqlx::query("SELECT * FROM public.document_by_connector_credential_pair WHERE id = $1")
+            .bind(document_id)
+            .fetch_all(pool)
+            .await?;
     let cc_pairs: Vec<Value> = cc_rows.iter().map(row_to_json).collect();
 
     let mut chunks: Vec<Value> = Vec::new();
@@ -271,7 +272,10 @@ fn expand_vectors(source: &mut Value) {
         return;
     };
     for field in ["content_vector", "title_vector"] {
-        let Some(packed) = obj.get(field).and_then(|v| v.get("__f16_b64")).and_then(Value::as_str)
+        let Some(packed) = obj
+            .get(field)
+            .and_then(|v| v.get("__f16_b64"))
+            .and_then(Value::as_str)
         else {
             continue;
         };
@@ -317,8 +321,9 @@ fn f32_to_f16_bits(value: f32) -> u16 {
     }
     let half = sign | ((unbiased as u16) << 10) | ((mantissa >> 13) as u16);
     // Round to nearest, ties to even.
-    let round = u16::from((mantissa & 0x1fff) > 0x1000
-        || ((mantissa & 0x1fff) == 0x1000 && (half & 1) == 1));
+    let round = u16::from(
+        (mantissa & 0x1fff) > 0x1000 || ((mantissa & 0x1fff) == 0x1000 && (half & 1) == 1),
+    );
     half + round
 }
 
@@ -359,12 +364,30 @@ fn row_to_json(row: &sqlx::postgres::PgRow) -> Value {
         // Decode by declared type: the snapshot has to survive a round trip
         // through JSON and back into the same column types.
         let value = match column.type_info().name() {
-            "INT2" => row.try_get::<i16, _>(idx).map(|v| json!(v)).unwrap_or(Value::Null),
-            "INT4" => row.try_get::<i32, _>(idx).map(|v| json!(v)).unwrap_or(Value::Null),
-            "INT8" => row.try_get::<i64, _>(idx).map(|v| json!(v)).unwrap_or(Value::Null),
-            "FLOAT4" => row.try_get::<f32, _>(idx).map(|v| json!(v)).unwrap_or(Value::Null),
-            "FLOAT8" => row.try_get::<f64, _>(idx).map(|v| json!(v)).unwrap_or(Value::Null),
-            "BOOL" => row.try_get::<bool, _>(idx).map(|v| json!(v)).unwrap_or(Value::Null),
+            "INT2" => row
+                .try_get::<i16, _>(idx)
+                .map(|v| json!(v))
+                .unwrap_or(Value::Null),
+            "INT4" => row
+                .try_get::<i32, _>(idx)
+                .map(|v| json!(v))
+                .unwrap_or(Value::Null),
+            "INT8" => row
+                .try_get::<i64, _>(idx)
+                .map(|v| json!(v))
+                .unwrap_or(Value::Null),
+            "FLOAT4" => row
+                .try_get::<f32, _>(idx)
+                .map(|v| json!(v))
+                .unwrap_or(Value::Null),
+            "FLOAT8" => row
+                .try_get::<f64, _>(idx)
+                .map(|v| json!(v))
+                .unwrap_or(Value::Null),
+            "BOOL" => row
+                .try_get::<bool, _>(idx)
+                .map(|v| json!(v))
+                .unwrap_or(Value::Null),
             "TIMESTAMPTZ" => row
                 .try_get::<DateTime<Utc>, _>(idx)
                 .map(|v| json!(v.to_rfc3339()))
@@ -505,13 +528,16 @@ pub async fn restore(
              understands ({SNAPSHOT_VERSION}); refusing a partial restore"
         )));
     }
-    let snapshot: Snapshot = serde_json::from_value(row.get::<Value, _>("snapshot"))
-        .map_err(|e| CoreError::Invalid(format!("snapshot for {document_id} is unreadable: {e}")))?;
+    let snapshot: Snapshot =
+        serde_json::from_value(row.get::<Value, _>("snapshot")).map_err(|e| {
+            CoreError::Invalid(format!("snapshot for {document_id} is unreadable: {e}"))
+        })?;
 
-    let exists: bool = sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM public.document WHERE id = $1)")
-        .bind(document_id)
-        .fetch_one(pool)
-        .await?;
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM public.document WHERE id = $1)")
+            .bind(document_id)
+            .fetch_one(pool)
+            .await?;
     if exists && !overwrite {
         return Err(CoreError::Conflict(format!(
             "{document_id} already exists in Onyx — the crawler brought it back. Restore with \
@@ -720,7 +746,8 @@ pub async fn list(
         qb.push(" AND t.connector_id = ").push_bind(connector_id);
     }
     if let Some(document_id) = &filter.document_id {
-        qb.push(" AND t.document_id = ").push_bind(document_id.clone());
+        qb.push(" AND t.document_id = ")
+            .push_bind(document_id.clone());
     }
     if let Some(hold) = filter.hold {
         qb.push(" AND t.hold = ").push_bind(hold);
@@ -860,7 +887,8 @@ pub async fn ids_matching(pool: &PgPool, filter: &TrashFilter) -> CoreResult<Vec
         qb.push(" AND connector_id = ").push_bind(connector_id);
     }
     if let Some(document_id) = &filter.document_id {
-        qb.push(" AND document_id = ").push_bind(document_id.clone());
+        qb.push(" AND document_id = ")
+            .push_bind(document_id.clone());
     }
     if let Some(hold) = filter.hold {
         qb.push(" AND hold = ").push_bind(hold);
@@ -1054,11 +1082,16 @@ mod tests {
             .split("pub async fn trash_and_delete")
             .nth(1)
             .expect("trash_and_delete exists");
-        let insert = body.find("INSERT INTO ovis.trash_document").expect("inserts");
+        let insert = body
+            .find("INSERT INTO ovis.trash_document")
+            .expect("inserts");
         let cascade = body.find("delete_document_in_tx").expect("cascades");
         let commit = body.find("tx.commit()").expect("commits");
         assert!(insert < cascade, "the snapshot must be written first");
-        assert!(cascade < commit, "the cascade must be inside the transaction");
+        assert!(
+            cascade < commit,
+            "the cascade must be inside the transaction"
+        );
         assert!(
             !body[insert..cascade].contains("commit"),
             "no commit may separate the snapshot from the deletion"

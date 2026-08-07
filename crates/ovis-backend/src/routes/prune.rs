@@ -268,8 +268,7 @@ mod tests {
 
     #[test]
     fn unknown_candidate_query_parameters_are_rejected() {
-        let err =
-            serde_urlencoded::from_str::<CandidatesQuery>("min_confidance=0.5").unwrap_err();
+        let err = serde_urlencoded::from_str::<CandidatesQuery>("min_confidance=0.5").unwrap_err();
         assert!(err.to_string().contains("unknown field"));
     }
 
@@ -297,9 +296,13 @@ mod tests {
 
 pub async fn overview(State(state): State<AppState>) -> Result<Response, AppError> {
     let mut overview = triage::overview(&state).await?;
-    attach_narrations(&state, "bundle", &mut overview.bundles, |b| &b.key, |b, n| {
-        b.narration = Some(n)
-    })
+    attach_narrations(
+        &state,
+        "bundle",
+        &mut overview.bundles,
+        |b| &b.key,
+        |b, n| b.narration = Some(n),
+    )
     .await;
     Ok(axum::Json(overview).into_response())
 }
@@ -322,10 +325,8 @@ async fn attach_narrations<T>(
     if found.is_empty() {
         return;
     }
-    let by_key: std::collections::HashMap<&str, &narrate::NarrationView> = found
-        .iter()
-        .map(|n| (n.subject_key.as_str(), n))
-        .collect();
+    let by_key: std::collections::HashMap<&str, &narrate::NarrationView> =
+        found.iter().map(|n| (n.subject_key.as_str(), n)).collect();
     for item in items.iter_mut() {
         if let Some(found) = by_key.get(key(item).as_str()).copied().cloned() {
             set(item, found);

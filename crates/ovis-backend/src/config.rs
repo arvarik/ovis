@@ -252,7 +252,9 @@ impl ServerConfig {
             ));
         }
         if self.prune_big_batch < 1 {
-            return Err(ConfigError("OVIS_PRUNE_BIG_BATCH must be at least 1.".into()));
+            return Err(ConfigError(
+                "OVIS_PRUNE_BIG_BATCH must be at least 1.".into(),
+            ));
         }
         if self.prune_scan_page_size < 1 {
             return Err(ConfigError(

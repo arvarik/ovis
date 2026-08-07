@@ -173,8 +173,12 @@ mod tests {
             .mount(&server)
             .await;
 
-        let provider =
-            Provider::new(ProviderKind::Anthropic, Some(&server.uri()), Some("k".into())).unwrap();
+        let provider = Provider::new(
+            ProviderKind::Anthropic,
+            Some(&server.uri()),
+            Some("k".into()),
+        )
+        .unwrap();
         let models = provider.list_models().await.unwrap();
         assert_eq!(models[0].advertised.context_tokens, Some(200000));
         assert_eq!(models[0].advertised.reasoning, Some(true));
@@ -194,8 +198,12 @@ mod tests {
             .mount(&server)
             .await;
 
-        let provider =
-            Provider::new(ProviderKind::Anthropic, Some(&server.uri()), Some("k".into())).unwrap();
+        let provider = Provider::new(
+            ProviderKind::Anthropic,
+            Some(&server.uri()),
+            Some("k".into()),
+        )
+        .unwrap();
         let out = provider
             .complete(&CompletionRequest::new("claude-haiku-4-5", "grade").logprobs(true))
             .await

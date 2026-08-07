@@ -151,7 +151,9 @@ async fn resolve(
     let ids = match (&request.document_ids, &request.filter) {
         (Some(ids), None) => {
             if ids.is_empty() {
-                return Err(AppError::BadRequest("document_ids must not be empty".into()));
+                return Err(AppError::BadRequest(
+                    "document_ids must not be empty".into(),
+                ));
             }
             ids.clone()
         }
@@ -346,7 +348,9 @@ pub async fn set_hold(
 ) -> Result<TrashBulkResponse, AppError> {
     guard(state)?;
     if request.document_ids.is_empty() {
-        return Err(AppError::BadRequest("document_ids must not be empty".into()));
+        return Err(AppError::BadRequest(
+            "document_ids must not be empty".into(),
+        ));
     }
     let mut changed = 0i64;
     let mut failed = Vec::new();
@@ -368,7 +372,11 @@ pub async fn set_hold(
     db::audit(
         &state.db,
         actor(state),
-        if request.hold { "trash_held" } else { "trash_hold_released" },
+        if request.hold {
+            "trash_held"
+        } else {
+            "trash_hold_released"
+        },
         None,
         None,
         None,

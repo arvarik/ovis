@@ -557,11 +557,7 @@ fn prune_delete_has_no_now_flag_by_grammar() {
     let run = Run::new("http://127.0.0.1:1");
     let output = run.cmd(&["prune", "delete", "@1", "--now"]);
     assert_eq!(code(&output), 2, "{}", stderr(&output));
-    assert!(
-        stderr(&output).contains("--now"),
-        "{}",
-        stderr(&output)
-    );
+    assert!(stderr(&output).contains("--now"), "{}", stderr(&output));
 }
 
 #[test]

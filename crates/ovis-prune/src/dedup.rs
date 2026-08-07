@@ -283,9 +283,8 @@ pub fn select_keep_document<'a>(
             )
         }
         PreferKeepPolicy::ShortestUrl => {
-            let len = |d: &DocumentWithContent| {
-                d.link.as_deref().map(str::len).unwrap_or(d.id.len())
-            };
+            let len =
+                |d: &DocumentWithContent| d.link.as_deref().map(str::len).unwrap_or(d.id.len());
             let (l1, l2) = (len(doc1), len(doc2));
             (
                 l1 < l2 || (l1 == l2 && doc1.id <= doc2.id),
@@ -293,10 +292,7 @@ pub fn select_keep_document<'a>(
             )
         }
         PreferKeepPolicy::MostChunks => {
-            let (c1, c2) = (
-                doc1.chunk_count.unwrap_or(0),
-                doc2.chunk_count.unwrap_or(0),
-            );
+            let (c1, c2) = (doc1.chunk_count.unwrap_or(0), doc2.chunk_count.unwrap_or(0));
             (
                 c1 > c2 || (c1 == c2 && doc1.id <= doc2.id),
                 format!("most chunks ({c1} vs {c2})"),

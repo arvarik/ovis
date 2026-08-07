@@ -417,7 +417,10 @@ mod tests {
             created_at: chrono::Utc::now(),
         };
         let err = connect(&row).unwrap_err();
-        assert!(err.to_string().contains("DEFINITELY_NOT_SET_12345"), "{err}");
+        assert!(
+            err.to_string().contains("DEFINITELY_NOT_SET_12345"),
+            "{err}"
+        );
         assert!(err.to_string().contains("not set on this process"), "{err}");
     }
 

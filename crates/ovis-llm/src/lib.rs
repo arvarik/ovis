@@ -46,6 +46,4 @@ pub mod provider;
 pub use handshake::{Capabilities, ThinkingChannel};
 pub use judge::{Grade, Judge};
 pub use narrate::{Narration, Narrator};
-pub use provider::{
-    Completion, CompletionRequest, Constraint, ModelInfo, Provider, ProviderKind,
-};
+pub use provider::{Completion, CompletionRequest, Constraint, ModelInfo, Provider, ProviderKind};

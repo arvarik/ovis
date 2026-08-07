@@ -371,7 +371,9 @@ mod tests {
             caps(false, true, false).best_constraint(&options),
             Some(Constraint::Schema(_))
         ));
-        assert!(caps(false, false, false).best_constraint(&options).is_none());
+        assert!(caps(false, false, false)
+            .best_constraint(&options)
+            .is_none());
     }
 
     #[test]
@@ -413,7 +415,9 @@ mod tests {
             caps.notes
         );
         assert!(
-            caps.notes.iter().any(|n| n.contains("cannot be used as a judge")),
+            caps.notes
+                .iter()
+                .any(|n| n.contains("cannot be used as a judge")),
             "{:?}",
             caps.notes
         );
@@ -428,7 +432,11 @@ mod tests {
                 // Constrained calls answer in the constrained shape; the
                 // logprob probe is unconstrained and answers plainly.
                 let constrained = body.get("response_format").is_some();
-                let content = if constrained { "{\"answer\":\"1\"}" } else { "1" };
+                let content = if constrained {
+                    "{\"answer\":\"1\"}"
+                } else {
+                    "1"
+                };
                 ResponseTemplate::new(200).set_body_json(json!({
                     "choices": [{ "message": { "content": content }, "finish_reason": "stop" }]
                 }))
@@ -467,7 +475,10 @@ mod tests {
         let provider =
             Provider::new(ProviderKind::OpenAiCompatible, Some(&server.uri()), None).unwrap();
         let caps = probe(&provider, "vllm-ish").await.unwrap();
-        assert!(!caps.logprobs, "one candidate carries no confidence information");
+        assert!(
+            !caps.logprobs,
+            "one candidate carries no confidence information"
+        );
     }
 
     #[tokio::test]

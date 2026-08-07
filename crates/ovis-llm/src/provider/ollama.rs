@@ -19,7 +19,11 @@ use super::{
 };
 
 pub(super) async fn list_models(provider: &Provider) -> CoreResult<Vec<ModelInfo>> {
-    let response = send_json(provider.authed(provider.http().get(provider.url("/api/tags"))), "list models").await?;
+    let response = send_json(
+        provider.authed(provider.http().get(provider.url("/api/tags"))),
+        "list models",
+    )
+    .await?;
 
     let entries = response
         .get("models")
@@ -150,9 +154,19 @@ mod tests {
         let provider = Provider::new(ProviderKind::Ollama, Some(&server.uri()), None).unwrap();
         let models = provider.list_models().await.unwrap();
         let chat = models.iter().find(|m| m.id == "qwen3:8b").unwrap();
-        assert_eq!(chat.advertised.description.as_deref(), Some("8.2B · Q4_K_M"));
+        assert_eq!(
+            chat.advertised.description.as_deref(),
+            Some("8.2B · Q4_K_M")
+        );
         assert!(!chat.advertised.is_embedding);
-        assert!(models.iter().find(|m| m.id.contains("nomic")).unwrap().advertised.is_embedding);
+        assert!(
+            models
+                .iter()
+                .find(|m| m.id.contains("nomic"))
+                .unwrap()
+                .advertised
+                .is_embedding
+        );
     }
 
     /// The MLX trap: 200 OK, no error, and the `format` constraint quietly

@@ -91,9 +91,7 @@ const ARCHIVE_EXTENSIONS: [&str; 10] = [
 /// though they are binaries. PDFs on this corpus are real content
 /// (`crs-reports-mirror`, `bitsavers-tech-archive`), so the classifier reports
 /// them separately and lets policy decide.
-const DOCUMENT_EXTENSIONS: [&str; 8] = [
-    "pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "epub",
-];
+const DOCUMENT_EXTENSIONS: [&str; 8] = ["pdf", "doc", "docx", "ppt", "pptx", "xls", "xlsx", "epub"];
 
 /// What kind of thing a URL points at.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -274,7 +272,13 @@ pub fn canonical_key(raw: &str) -> Option<String> {
         key.push('?');
         let rendered: Vec<String> = query_pairs
             .iter()
-            .map(|(k, v)| if v.is_empty() { k.clone() } else { format!("{k}={v}") })
+            .map(|(k, v)| {
+                if v.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{k}={v}")
+                }
+            })
             .collect();
         key.push_str(&rendered.join("&"));
     }
@@ -315,7 +319,9 @@ pub fn path_depth(raw: &str) -> usize {
 /// Whether the URL carries a query string at all (a keeper tiebreak: the copy
 /// without parameters is usually the canonical one).
 pub fn has_query(raw: &str) -> bool {
-    split(raw.trim()).map(|p| p.query.is_some()).unwrap_or(false)
+    split(raw.trim())
+        .map(|p| p.query.is_some())
+        .unwrap_or(false)
 }
 
 /// Whether a URL looks like a dated archive edition of a live page, e.g.
@@ -411,12 +417,15 @@ mod tests {
         // Observed on gamma: esa.int serves the same page under a (lang)
         // suffix. These differ by a path segment, so they must NOT fold —
         // this test pins that we do not over-collapse.
-        let a = canonical_key("https://www.esa.int/ESA_Multimedia/Videos/2020/05/A_future").unwrap();
-        let b = canonical_key(
-            "https://www.esa.int/ESA_Multimedia/Videos/2020/05/A_future/(lang)/en",
-        )
-        .unwrap();
-        assert_ne!(a, b, "a path difference is a different URL; only policy may equate them");
+        let a =
+            canonical_key("https://www.esa.int/ESA_Multimedia/Videos/2020/05/A_future").unwrap();
+        let b =
+            canonical_key("https://www.esa.int/ESA_Multimedia/Videos/2020/05/A_future/(lang)/en")
+                .unwrap();
+        assert_ne!(
+            a, b,
+            "a path difference is a different URL; only policy may equate them"
+        );
     }
 
     #[test]
@@ -432,18 +441,27 @@ mod tests {
         assert_eq!(classify("https://a.com/x/y/photo.JPEG"), UrlClass::Image);
         assert_eq!(classify("https://a.com/clip.mp4"), UrlClass::Media);
         assert_eq!(classify("https://a.com/dump.tar.gz"), UrlClass::Archive);
-        assert_eq!(classify("https://a.com/report.pdf"), UrlClass::BinaryDocument);
+        assert_eq!(
+            classify("https://a.com/report.pdf"),
+            UrlClass::BinaryDocument
+        );
         assert_eq!(classify("https://a.com/page"), UrlClass::Page);
         assert_eq!(classify("https://a.com/"), UrlClass::Page);
 
         assert!(UrlClass::Image.is_asset());
-        assert!(!UrlClass::BinaryDocument.is_asset(), "PDFs are real content here");
+        assert!(
+            !UrlClass::BinaryDocument.is_asset(),
+            "PDFs are real content here"
+        );
         assert!(!UrlClass::Page.is_asset());
     }
 
     #[test]
     fn a_query_string_does_not_confuse_the_extension_classifier() {
-        assert_eq!(classify("https://a.com/cat.png?size=large"), UrlClass::Image);
+        assert_eq!(
+            classify("https://a.com/cat.png?size=large"),
+            UrlClass::Image
+        );
     }
 
     #[test]

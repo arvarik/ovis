@@ -164,7 +164,11 @@ async fn run_scan(state: &AppState, scan: PruneScanItem) {
     db::audit(
         &state.db,
         "scan",
-        if resumed { "scan_resumed" } else { "scan_started" },
+        if resumed {
+            "scan_resumed"
+        } else {
+            "scan_started"
+        },
         None,
         Some(scan.id),
         None,
@@ -176,8 +180,7 @@ async fn run_scan(state: &AppState, scan: PruneScanItem) {
         Ok((ScanEnd::Done, mut stats)) => {
             // Scoped by this scan's id, so a resumed scan keeps the candidates
             // its earlier pass wrote and nothing depends on comparing clocks.
-            match db::close_stale_candidates(&state.db, scan.id, &scan.detectors, &scan.scope)
-                .await
+            match db::close_stale_candidates(&state.db, scan.id, &scan.detectors, &scan.scope).await
             {
                 Ok(closed) => {
                     stats.candidates_closed = closed.len() as i64;
@@ -216,9 +219,20 @@ async fn run_scan(state: &AppState, scan: PruneScanItem) {
         }
         Ok((ScanEnd::Cancelled, stats)) => {
             let _ = db::scan_finish(&state.db, scan.id, "cancelled", None, &stats.to_json()).await;
-            db::audit(&state.db, "scan", "scan_cancelled_stopped", None, Some(scan.id), None, None)
-                .await;
-            tracing::info!(scan_id = scan.id, "prune scan stopped at a cancellation checkpoint");
+            db::audit(
+                &state.db,
+                "scan",
+                "scan_cancelled_stopped",
+                None,
+                Some(scan.id),
+                None,
+                None,
+            )
+            .await;
+            tracing::info!(
+                scan_id = scan.id,
+                "prune scan stopped at a cancellation checkpoint"
+            );
         }
         Err(err) if is_config_too_new(&err) => {
             // Another, newer instance queued this scan with configuration this
@@ -339,9 +353,10 @@ fn is_config_too_new(err: &crate::error::AppError) -> bool {
 fn config_from_snapshot(
     snapshot: &Value,
 ) -> Result<(PruneConfig, Vec<CompiledRule>, Vec<CompiledRule>), crate::error::AppError> {
-    let config: PruneConfig =
-        serde_json::from_value(snapshot.get("config").cloned().unwrap_or(Value::Null))
-            .map_err(|e| crate::error::AppError::BadRequest(format!("scan config snapshot: {e}")))?;
+    let config: PruneConfig = serde_json::from_value(
+        snapshot.get("config").cloned().unwrap_or(Value::Null),
+    )
+    .map_err(|e| crate::error::AppError::BadRequest(format!("scan config snapshot: {e}")))?;
     let url_rules = compiled_from_snapshot(snapshot, "url_rules")?;
     let tag_rules = compiled_from_snapshot(snapshot, "tag_rules")?;
     Ok((config, url_rules, tag_rules))
@@ -431,12 +446,12 @@ async fn execute(
     };
 
     // Restore checkpoint + stats from the scan row (resume case).
-    let fresh = db::get_scan(&state.db, scan.id)
-        .await?
-        .ok_or_else(|| crate::error::AppError::NotFound {
+    let fresh = db::get_scan(&state.db, scan.id).await?.ok_or_else(|| {
+        crate::error::AppError::NotFound {
             what: "prune scan",
             id: scan.id.to_string(),
-        })?;
+        }
+    })?;
     let mut stats: ScanStats = serde_json::from_value(fresh.stats.clone()).unwrap_or_default();
     let mut checkpoint: Checkpoint = match db::scan_checkpoint_value(&state.db, scan.id).await? {
         Some(value) => serde_json::from_value(value).unwrap_or_default(),
@@ -495,18 +510,17 @@ async fn execute(
             }
 
             // Tag rules read one batch per page.
-            let page_tags: HashMap<String, Vec<(String, String)>> = if ctx.wants("tag_rule")
-                && !ctx.tag_rules.is_empty()
-            {
-                let ids: Vec<String> = page.iter().map(|d| d.id.clone()).collect();
-                let mut map: HashMap<String, Vec<(String, String)>> = HashMap::new();
-                for (doc_id, key, value) in db::tags_for_documents(&state.db, &ids).await? {
-                    map.entry(doc_id).or_default().push((key, value));
-                }
-                map
-            } else {
-                HashMap::new()
-            };
+            let page_tags: HashMap<String, Vec<(String, String)>> =
+                if ctx.wants("tag_rule") && !ctx.tag_rules.is_empty() {
+                    let ids: Vec<String> = page.iter().map(|d| d.id.clone()).collect();
+                    let mut map: HashMap<String, Vec<(String, String)>> = HashMap::new();
+                    for (doc_id, key, value) in db::tags_for_documents(&state.db, &ids).await? {
+                        map.entry(doc_id).or_default().push((key, value));
+                    }
+                    map
+                } else {
+                    HashMap::new()
+                };
 
             // Accumulated per page, flushed in one round trip each. The v1
             // loop wrote every candidate individually, which is what made the
@@ -575,8 +589,14 @@ async fn execute(
                 // near-duplicate signature. 0-chunk documents have nothing to
                 // fetch (the stub detector owns them).
                 if ctx.wants_content() && doc.chunk_count != Some(0) {
-                    match content_pass(&ctx, doc, page_content.get(&doc.id), &mut stats, &mut profile)
-                        .await
+                    match content_pass(
+                        &ctx,
+                        doc,
+                        page_content.get(&doc.id),
+                        &mut stats,
+                        &mut profile,
+                    )
+                    .await
                     {
                         Ok(mut content_reasons) => {
                             consecutive_content_errors = 0;
@@ -780,8 +800,10 @@ async fn execute(
             let mut page_hits: Vec<DetectorHit> = Vec::new();
             let mut group_memberships: Vec<profile_db::DupMembership> = Vec::new();
             for (key, ids) in &by_key {
-                let members: Vec<&ScanDocRow> =
-                    ids.iter().filter_map(|id| by_id.get(id.as_str()).copied()).collect();
+                let members: Vec<&ScanDocRow> = ids
+                    .iter()
+                    .filter_map(|id| by_id.get(id.as_str()).copied())
+                    .collect();
                 if members.len() < 2 {
                     continue;
                 }
@@ -1100,7 +1122,10 @@ async fn content_pass(
             std::slice::from_ref(&doc.id),
         )
         .await?;
-        need_signature = existing.first().map(|(_, fp)| fp != &fingerprint).unwrap_or(true);
+        need_signature = existing
+            .first()
+            .map(|(_, fp)| fp != &fingerprint)
+            .unwrap_or(true);
         if !need_signature {
             stats.signatures_reused += 1;
         }
@@ -1377,8 +1402,7 @@ async fn near_pairs_for_bucket(
             ]
         })
         .collect();
-    if let Err(err) =
-        profile_db::set_max_similarity(&ctx.state.db, "minhash", &similarities).await
+    if let Err(err) = profile_db::set_max_similarity(&ctx.state.db, "minhash", &similarities).await
     {
         tracing::warn!(error = %err, "recording maximum similarity failed");
     }
@@ -1389,7 +1413,11 @@ async fn near_pairs_for_bucket(
         };
         let group = [*doc_a, *doc_b];
         let keeper = select_keeper(&group, ctx.config.dedup.prefer_keep);
-        let flagged = if keeper.id == doc_a.id { *doc_b } else { *doc_a };
+        let flagged = if keeper.id == doc_a.id {
+            *doc_b
+        } else {
+            *doc_a
+        };
         if !in_scope.contains(&flagged.id) {
             continue;
         }
@@ -1404,7 +1432,11 @@ async fn near_pairs_for_bucket(
                     sim * 100.0,
                     keeper.id,
                     ctx.config.dedup.similarity_threshold * 100.0,
-                    if report_only { "; below it — report only" } else { "" },
+                    if report_only {
+                        "; below it — report only"
+                    } else {
+                        ""
+                    },
                     policy_name(ctx.config.dedup.prefer_keep),
                 ),
                 confidence: sim as f32,
@@ -1509,7 +1541,10 @@ fn url_rule_reason(doc: &ScanDocRow, rule: &CompiledRule) -> PruneReason {
         detector: "url_rule".into(),
         // The rule name, so two different rules never fold into one reason.
         code: rule.name.clone(),
-        detail: format!("URL matches rule '{}' (pattern: {})", rule.name, rule.pattern),
+        detail: format!(
+            "URL matches rule '{}' (pattern: {})",
+            rule.name, rule.pattern
+        ),
         confidence: rule.confidence,
         evidence: json!({
             "rule": rule.name,
@@ -1687,7 +1722,10 @@ mod tests {
         let d = doc("https://a/calendar/2024/05", Some(2), 10);
         let reason = url_rule_reason(&d, &rule);
         assert_eq!(reason.detector, "url_rule");
-        assert_eq!(reason.code, "calendar-pages", "distinct rules must not fold");
+        assert_eq!(
+            reason.code, "calendar-pages",
+            "distinct rules must not fold"
+        );
         assert_eq!(reason.evidence["matched"], "/calendar/2024");
     }
 

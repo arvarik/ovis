@@ -513,8 +513,11 @@ impl ApiClient {
     }
 
     pub async fn prune_rule_preview(&self, id: i64) -> CliResult<PruneRulePreviewResponse> {
-        self.post(&format!("/prune/rules/{id}/preview"), &serde_json::json!({}))
-            .await
+        self.post(
+            &format!("/prune/rules/{id}/preview"),
+            &serde_json::json!({}),
+        )
+        .await
     }
 
     pub async fn prune_config_export(&self) -> CliResult<String> {

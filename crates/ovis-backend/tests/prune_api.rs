@@ -124,7 +124,6 @@ impl DbLock {
     }
 }
 
-
 /// OpenSearch stand-in. `read_only` controls what `{index}/_settings` reports,
 /// which is what halts the reaper.
 async fn mock_opensearch(read_only: bool) -> MockServer {
@@ -724,10 +723,12 @@ async fn a_rescan_updates_open_candidates_and_closes_resolved_ones() {
     let open_before = candidate_ids_by_state(&h, "candidate").await;
 
     // The old stub gets chunked in the meantime — it is no longer a stub.
-    sqlx::query("UPDATE public.document SET chunk_count = 5 WHERE id = 'https://paused.example/old-stub'")
-        .execute(&h.state.db)
-        .await
-        .unwrap();
+    sqlx::query(
+        "UPDATE public.document SET chunk_count = 5 WHERE id = 'https://paused.example/old-stub'",
+    )
+    .execute(&h.state.db)
+    .await
+    .unwrap();
 
     let second = run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
     assert_eq!(second["status"], "done");
@@ -825,7 +826,10 @@ async fn stage_requires_a_matching_confirm_count_and_is_exactly_reversible() {
     let expires = body["stage_expires_at"].as_str().unwrap();
     let expires: chrono::DateTime<chrono::Utc> = expires.parse().unwrap();
     let days = (expires - chrono::Utc::now()).num_hours();
-    assert!((167..=169).contains(&days), "grace should be ~7 days, got {days}h");
+    assert!(
+        (167..=169).contains(&days),
+        "grace should be ~7 days, got {days}h"
+    );
 
     assert_eq!(
         doc_hidden(&h.state, "https://paused.example/old-stub").await,
@@ -846,13 +850,21 @@ async fn stage_requires_a_matching_confirm_count_and_is_exactly_reversible() {
     assert_eq!(
         prev,
         vec![
-            ("https://paused.example/already-hidden-stub".to_string(), true),
+            (
+                "https://paused.example/already-hidden-stub".to_string(),
+                true
+            ),
             ("https://paused.example/old-stub".to_string(), false),
         ]
     );
 
     // Restore: no confirm needed (the safe direction), exact by construction.
-    let reply = post_json(&h.app, "/api/v1/prune/candidates/restore", json!({ "filter": {} })).await;
+    let reply = post_json(
+        &h.app,
+        "/api/v1/prune/candidates/restore",
+        json!({ "filter": {} }),
+    )
+    .await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
     assert_eq!(reply.json()["changed"], 2);
 
@@ -876,9 +888,13 @@ async fn stage_requires_a_matching_confirm_count_and_is_exactly_reversible() {
     assert_eq!(before, after, "stage → restore must be byte-exact");
 
     // Audit trail: staged and restored rows for both documents.
-    let audit = get(&h.app, "/api/v1/prune/audit?action=staged").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=staged")
+        .await
+        .json();
     assert_eq!(audit["total"], 2);
-    let audit = get(&h.app, "/api/v1/prune/audit?action=restored").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=restored")
+        .await
+        .json();
     assert_eq!(audit["total"], 2);
 }
 
@@ -1005,12 +1021,11 @@ async fn the_reaper_deletes_due_documents_through_the_full_cascade() {
             .fetch_all(&h.state.db)
             .await
             .unwrap();
-    let connector_cfg_before: Value = sqlx::query_scalar(
-        "SELECT connector_specific_config FROM public.connector WHERE id = 2",
-    )
-    .fetch_one(&h.state.db)
-    .await
-    .unwrap();
+    let connector_cfg_before: Value =
+        sqlx::query_scalar("SELECT connector_specific_config FROM public.connector WHERE id = 2")
+            .fetch_one(&h.state.db)
+            .await
+            .unwrap();
 
     // Stage + expedite both duplicates, remembering them.
     post_json(
@@ -1050,7 +1065,11 @@ async fn the_reaper_deletes_due_documents_through_the_full_cascade() {
         "https://paused.example/dup?utm_source=feed",
         "https://paused.example/dup/print/view",
     ] {
-        assert_eq!(doc_hidden(&h.state, doc).await, None, "{doc} should be deleted");
+        assert_eq!(
+            doc_hidden(&h.state, doc).await,
+            None,
+            "{doc} should be deleted"
+        );
         let dcc: i64 = sqlx::query_scalar(
             "SELECT count(*) FROM public.document_by_connector_credential_pair WHERE id = $1",
         )
@@ -1096,7 +1115,9 @@ async fn the_reaper_deletes_due_documents_through_the_full_cascade() {
     }
 
     // Audit: two deleted rows with outcomes.
-    let audit = get(&h.app, "/api/v1/prune/audit?action=deleted").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=deleted")
+        .await
+        .json();
     assert_eq!(audit["total"], 2);
 
     // The landmines are untouched.
@@ -1105,7 +1126,10 @@ async fn the_reaper_deletes_due_documents_through_the_full_cascade() {
             .fetch_one(&h.state.db)
             .await
             .unwrap();
-    assert_eq!(sentinel_before, sentinel_after, "park sentinel must survive");
+    assert_eq!(
+        sentinel_before, sentinel_after,
+        "park sentinel must survive"
+    );
     assert_eq!(sentinel_after, "first-pass already complete");
     let search_settings_after: Vec<(i32, String)> =
         sqlx::query_as("SELECT id, status FROM public.search_settings ORDER BY id")
@@ -1113,12 +1137,11 @@ async fn the_reaper_deletes_due_documents_through_the_full_cascade() {
             .await
             .unwrap();
     assert_eq!(search_settings_before, search_settings_after);
-    let connector_cfg_after: Value = sqlx::query_scalar(
-        "SELECT connector_specific_config FROM public.connector WHERE id = 2",
-    )
-    .fetch_one(&h.state.db)
-    .await
-    .unwrap();
+    let connector_cfg_after: Value =
+        sqlx::query_scalar("SELECT connector_specific_config FROM public.connector WHERE id = 2")
+            .fetch_one(&h.state.db)
+            .await
+            .unwrap();
     assert_eq!(connector_cfg_before, connector_cfg_after);
 }
 
@@ -1165,7 +1188,9 @@ async fn the_reaper_defers_documents_on_pairs_that_are_indexing() {
     assert_eq!(status["reaper"]["deferred"], 1);
     assert_eq!(status["reaper"]["deferred_reason"], "indexing_in_progress");
 
-    let audit = get(&h.app, "/api/v1/prune/audit?action=deferred").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=deferred")
+        .await
+        .json();
     assert!(audit["total"].as_i64().unwrap() >= 1);
 }
 
@@ -1199,9 +1224,11 @@ async fn the_reaper_halts_when_the_index_is_read_only() {
     assert_eq!(report.deleted, 0);
 
     // Nothing was deleted; the due rows are still staged and restorable.
-    assert!(doc_hidden(&h.state, "https://paused.example/dup?utm_source=feed")
-        .await
-        .is_some());
+    assert!(
+        doc_hidden(&h.state, "https://paused.example/dup?utm_source=feed")
+            .await
+            .is_some()
+    );
     let staged: i64 =
         sqlx::query_scalar("SELECT count(*) FROM ovis.prune_candidate WHERE state = 'staged'")
             .fetch_one(&h.state.db)
@@ -1213,7 +1240,9 @@ async fn the_reaper_halts_when_the_index_is_read_only() {
     assert_eq!(status["reaper"]["halted"], true);
     assert_eq!(status["reaper"]["halted_reason"], "index_read_only");
 
-    let audit = get(&h.app, "/api/v1/prune/audit?action=halted").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=halted")
+        .await
+        .json();
     assert_eq!(audit["total"], 1);
 }
 
@@ -1277,17 +1306,19 @@ async fn a_crashed_reaper_run_recovers_without_double_deleting() {
     assert_eq!(doc_hidden(&h.state, &intact_doc).await, Some(false));
 
     // The already-gone document is closed honestly, with cleanup queued.
-    let (gone_state, outcome): (String, Value) = sqlx::query_as(
-        "SELECT state, delete_outcome FROM ovis.prune_candidate WHERE id = $1",
-    )
-    .bind(gone_id)
-    .fetch_one(&h.state.db)
-    .await
-    .unwrap();
+    let (gone_state, outcome): (String, Value) =
+        sqlx::query_as("SELECT state, delete_outcome FROM ovis.prune_candidate WHERE id = $1")
+            .bind(gone_id)
+            .fetch_one(&h.state.db)
+            .await
+            .unwrap();
     assert_eq!(gone_state, "deleted");
     assert_eq!(outcome["recovered_after_crash"], true);
     assert_eq!(outcome["index_cleanup_pending"], true);
-    assert!(outcome["chunks_deleted"].is_null(), "unknown is null, not 0");
+    assert!(
+        outcome["chunks_deleted"].is_null(),
+        "unknown is null, not 0"
+    );
 
     let queued: i64 = sqlx::query_scalar(
         "SELECT count(*) FROM ovis.pending_index_deletes WHERE document_id = $1",
@@ -1296,7 +1327,10 @@ async fn a_crashed_reaper_run_recovers_without_double_deleting() {
     .fetch_one(&h.state.db)
     .await
     .unwrap();
-    assert_eq!(queued, 1, "index cleanup must be queued for the half-deleted doc");
+    assert_eq!(
+        queued, 1,
+        "index cleanup must be queued for the half-deleted doc"
+    );
 }
 
 #[tokio::test]
@@ -1349,13 +1383,17 @@ async fn the_reaper_closes_documents_that_vanished_before_their_grace_ended() {
             .unwrap();
     assert_eq!(state_name, "deleted");
     assert_eq!(outcome["already_gone"], true);
-    assert_eq!(outcome["index_cleanup_pending"], true, "chunks may remain; queued");
-    let queued: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM ovis.pending_index_deletes WHERE document_id = $1")
-            .bind(&doc)
-            .fetch_one(&h.state.db)
-            .await
-            .unwrap();
+    assert_eq!(
+        outcome["index_cleanup_pending"], true,
+        "chunks may remain; queued"
+    );
+    let queued: i64 = sqlx::query_scalar(
+        "SELECT count(*) FROM ovis.pending_index_deletes WHERE document_id = $1",
+    )
+    .bind(&doc)
+    .fetch_one(&h.state.db)
+    .await
+    .unwrap();
     assert_eq!(queued, 1);
     // remember still records the exclusion — if it is recrawled, it re-stages.
     let excluded: i64 =
@@ -1452,7 +1490,10 @@ async fn recrawled_remembered_documents_are_restaged_never_deleted() {
     .fetch_one(&h.state.db)
     .await
     .unwrap();
-    assert_eq!(due_now, 0, "the re-staged document gets the full grace period");
+    assert_eq!(
+        due_now, 0,
+        "the re-staged document gets the full grace period"
+    );
 
     // The reason is specific, and user_excluded documents are NOT re-staged.
     let reasons: Value = sqlx::query_scalar(
@@ -1522,9 +1563,12 @@ async fn near_duplicate_scan_finds_the_pair_with_persisted_signatures() {
         "{scan}"
     );
 
-    let body = get(&h.app, "/api/v1/prune/candidates?detector=duplicate&limit=100")
-        .await
-        .json();
+    let body = get(
+        &h.app,
+        "/api/v1/prune/candidates?detector=duplicate&limit=100",
+    )
+    .await
+    .json();
     let copy = body["items"]
         .as_array()
         .unwrap()
@@ -1562,7 +1606,10 @@ async fn near_duplicate_scan_finds_the_pair_with_persisted_signatures() {
         rescan["stats"]["signatures_reused"].as_i64().unwrap() >= 3,
         "{rescan}"
     );
-    assert_eq!(rescan["stats"]["candidates_new"], 0, "updated, not duplicated");
+    assert_eq!(
+        rescan["stats"]["candidates_new"], 0,
+        "updated, not duplicated"
+    );
 }
 
 #[tokio::test]
@@ -1595,9 +1642,12 @@ async fn language_scan_flags_disallowed_languages_when_enabled() {
     assert_eq!(queued.status, StatusCode::ACCEPTED, "{}", queued.body);
     prune_scan::run_next_scan(&h.state).await;
 
-    let body = get(&h.app, "/api/v1/prune/candidates?detector=language&limit=100")
-        .await
-        .json();
+    let body = get(
+        &h.app,
+        "/api/v1/prune/candidates?detector=language&limit=100",
+    )
+    .await
+    .json();
     assert_eq!(body["total"], 1, "only the German page: {body}");
     let item = &body["items"][0];
     assert_eq!(item["document_id"], "https://paused.example/de/impressum");
@@ -1650,7 +1700,10 @@ async fn url_rules_flag_matches_and_carry_the_rule_name() {
         .iter()
         .map(|i| i["document_id"].as_str().unwrap())
         .collect();
-    assert!(flagged.contains(&"https://paused.example/dup?utm_source=feed"), "{flagged:?}");
+    assert!(
+        flagged.contains(&"https://paused.example/dup?utm_source=feed"),
+        "{flagged:?}"
+    );
     let item = body["items"]
         .as_array()
         .unwrap()
@@ -1673,10 +1726,9 @@ async fn config_export_import_round_trips_and_takes_effect() {
     assert!(exported.body.contains("enabled: false"));
 
     // Import a config with language detection on.
-    let modified = exported.body.replace(
-        "language:\n  enabled: false",
-        "language:\n  enabled: true",
-    );
+    let modified = exported
+        .body
+        .replace("language:\n  enabled: false", "language:\n  enabled: true");
     assert_ne!(modified, exported.body, "the fixture edit must apply");
     let reply = send(
         &h.app,
@@ -1743,17 +1795,18 @@ async fn a_running_scan_resumes_from_its_checkpoint_after_a_restart() {
     .await
     .unwrap();
 
-    let remaining: i64 =
-        sqlx::query_scalar("SELECT count(*) FROM public.document WHERE id > $1")
-            .bind(cursor)
-            .fetch_one(&h.state.db)
-            .await
-            .unwrap();
+    let remaining: i64 = sqlx::query_scalar("SELECT count(*) FROM public.document WHERE id > $1")
+        .bind(cursor)
+        .fetch_one(&h.state.db)
+        .await
+        .unwrap();
     assert!(remaining > 0, "the fixture needs ids after the cursor");
 
     assert!(prune_scan::run_next_scan(&h.state).await);
 
-    let done = get(&h.app, &format!("/api/v1/prune/scans/{scan_id}")).await.json();
+    let done = get(&h.app, &format!("/api/v1/prune/scans/{scan_id}"))
+        .await
+        .json();
     assert_eq!(done["status"], "done");
     assert_eq!(
         done["examined"].as_i64().unwrap(),
@@ -1772,10 +1825,18 @@ async fn a_running_scan_resumes_from_its_checkpoint_after_a_restart() {
         .iter()
         .map(|i| i["document_id"].as_str().unwrap())
         .collect();
-    assert!(!flagged.contains(&"https://example.com/active-stub"), "before the cursor");
-    assert!(flagged.contains(&"https://paused.example/old-stub"), "after the cursor");
+    assert!(
+        !flagged.contains(&"https://example.com/active-stub"),
+        "before the cursor"
+    );
+    assert!(
+        flagged.contains(&"https://paused.example/old-stub"),
+        "after the cursor"
+    );
 
-    let audit = get(&h.app, "/api/v1/prune/audit?action=scan_resumed").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=scan_resumed")
+        .await
+        .json();
     assert_eq!(audit["total"], 1, "the resume is audited");
 }
 
@@ -1800,7 +1861,10 @@ async fn starter_rules_ship_disabled_and_preview_never_mutates() {
         .unwrap();
     let reply = post_json(
         &h.app,
-        &format!("/api/v1/prune/rules/{}/preview", tracking["id"].as_i64().unwrap()),
+        &format!(
+            "/api/v1/prune/rules/{}/preview",
+            tracking["id"].as_i64().unwrap()
+        ),
         json!({}),
     )
     .await;
@@ -1847,9 +1911,12 @@ async fn asset_urls_are_flagged_and_pdfs_are_left_alone() {
     assert_eq!(scan["status"], "done", "{scan}");
     assert!(scan["stats"]["asset_hits"].as_i64().unwrap() >= 1);
 
-    let candidates = get(&h.app, "/api/v1/prune/candidates?detector=url_junk&limit=100")
-        .await
-        .json();
+    let candidates = get(
+        &h.app,
+        "/api/v1/prune/candidates?detector=url_junk&limit=100",
+    )
+    .await
+    .json();
     let flagged: Vec<&str> = candidates["items"]
         .as_array()
         .unwrap()
@@ -1890,7 +1957,12 @@ async fn url_variants_are_grouped_even_when_content_hashes_differ() {
 
     // The canonical key is computed during the document walk, so the variant
     // phase needs a walk detector alongside it.
-    let scan = run_scan(&h, json!({ "kind": "all" }), json!(["url_junk", "url_variant"])).await;
+    let scan = run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["url_junk", "url_variant"]),
+    )
+    .await;
     assert_eq!(scan["status"], "done", "{scan}");
     // Two groups: the news/story pair, and — correctly — the exact-duplicate
     // fixture, whose `?utm_source=feed` copy canonicalises onto the clean URL.
@@ -1902,14 +1974,14 @@ async fn url_variants_are_grouped_even_when_content_hashes_differ() {
     );
     assert_eq!(scan["stats"]["url_variant_hits"], 2, "one non-keeper each");
 
-    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=100").await.json();
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=100")
+        .await
+        .json();
     let variant = candidates["items"]
         .as_array()
         .unwrap()
         .iter()
-        .find(|c| {
-            c["document_id"] == "http://www.paused.example/news/story/?utm_source=newsletter"
-        })
+        .find(|c| c["document_id"] == "http://www.paused.example/news/story/?utm_source=newsletter")
         .expect("the news/story variant is flagged");
 
     // The tracked, www, trailing-slash copy is the one flagged; the clean URL
@@ -1924,7 +1996,10 @@ async fn url_variants_are_grouped_even_when_content_hashes_differ() {
         .iter()
         .find(|r| r["code"] == "url_variant_of")
         .unwrap();
-    assert_eq!(reason["evidence"]["kept"], "https://paused.example/news/story");
+    assert_eq!(
+        reason["evidence"]["kept"],
+        "https://paused.example/news/story"
+    );
     assert_eq!(reason["evidence"]["group_size"], 2);
 }
 
@@ -1947,9 +2022,12 @@ async fn quality_gates_flag_navigation_chrome_and_spare_real_prose() {
         "every examined document gets a profile: {scan}"
     );
 
-    let candidates = get(&h.app, "/api/v1/prune/candidates?detector=quality&limit=100")
-        .await
-        .json();
+    let candidates = get(
+        &h.app,
+        "/api/v1/prune/candidates?detector=quality&limit=100",
+    )
+    .await
+    .json();
     let flagged: Vec<&str> = candidates["items"]
         .as_array()
         .unwrap()
@@ -2060,7 +2138,10 @@ async fn near_duplicate_pairs_are_stored_for_later_rethresholding() {
     .fetch_all(&h.state.db)
     .await
     .unwrap();
-    assert!(!pairs.is_empty(), "the guide/guide-copy pair must be stored");
+    assert!(
+        !pairs.is_empty(),
+        "the guide/guide-copy pair must be stored"
+    );
 
     let (a, b, estimated, same_connector) = &pairs[0];
     assert!(a < b, "pairs are stored in a canonical order");
@@ -2075,13 +2156,12 @@ async fn near_duplicate_pairs_are_stored_for_later_rethresholding() {
     );
 
     // The profile carries each side's strongest similarity.
-    let max_jaccard: Option<f32> = sqlx::query_scalar(
-        "SELECT max_jaccard FROM ovis.doc_profile WHERE document_id = $1",
-    )
-    .bind(a)
-    .fetch_one(&h.state.db)
-    .await
-    .unwrap();
+    let max_jaccard: Option<f32> =
+        sqlx::query_scalar("SELECT max_jaccard FROM ovis.doc_profile WHERE document_id = $1")
+            .bind(a)
+            .fetch_one(&h.state.db)
+            .await
+            .unwrap();
     assert!(max_jaccard.unwrap() >= 0.8);
 }
 
@@ -2160,7 +2240,10 @@ async fn simulating_a_policy_reports_bands_without_creating_anything() {
         body["profiled"].as_i64().unwrap(),
         "the three bands must partition the profiled set: {body}"
     );
-    assert!(auto > 0, "stubs and duplicates should reach the auto band: {body}");
+    assert!(
+        auto > 0,
+        "stubs and duplicates should reach the auto band: {body}"
+    );
 
     // Boundary samples let a threshold be checked against real documents.
     assert!(
@@ -2223,7 +2306,12 @@ async fn an_incoherent_policy_is_refused_with_the_reason() {
     assert_eq!(reply.status, StatusCode::BAD_REQUEST, "{}", reply.body);
     assert!(reply.body.contains("stronger claim"), "{}", reply.body);
 
-    let reply = post_json(&h.app, "/api/v1/prune/simulate", json!({ "tier": "nuclear" })).await;
+    let reply = post_json(
+        &h.app,
+        "/api/v1/prune/simulate",
+        json!({ "tier": "nuclear" }),
+    )
+    .await;
     assert_eq!(reply.status, StatusCode::BAD_REQUEST);
     assert!(reply.body.contains("conservative"), "{}", reply.body);
 }
@@ -2237,9 +2325,13 @@ async fn committing_a_policy_requires_the_simulated_count() {
     };
     run_scan(&h, json!({ "kind": "all" }), json!(["quality", "url_junk"])).await;
 
-    let simulated = post_json(&h.app, "/api/v1/prune/simulate", json!({ "tier": "standard" }))
-        .await
-        .json();
+    let simulated = post_json(
+        &h.app,
+        "/api/v1/prune/simulate",
+        json!({ "tier": "standard" }),
+    )
+    .await
+    .json();
     let auto = simulated["auto"].as_i64().unwrap();
     assert!(auto > 0);
 
@@ -2377,8 +2469,16 @@ async fn a_missing_annotation_table_costs_the_titles_not_the_screen() {
     let Some(h) = harness().await else {
         return skip("a_missing_annotation_table_costs_the_titles_not_the_screen");
     };
-    run_scan(&h, json!({ "kind": "all" }), json!(["exact_duplicate", "thin"])).await;
-    assert!(h.state.llm_enabled, "the harness must have the LLM path live");
+    run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["exact_duplicate", "thin"]),
+    )
+    .await;
+    assert!(
+        h.state.llm_enabled,
+        "the harness must have the LLM path live"
+    );
 
     sqlx::query("DROP TABLE ovis.llm_annotation")
         .execute(&h.state.db)
@@ -2577,7 +2677,12 @@ async fn url_clusters_are_keyed_by_canonical_url_not_by_its_scheme() {
     let Some(h) = harness().await else {
         return skip("url_clusters_are_keyed_by_canonical_url_not_by_its_scheme");
     };
-    run_scan(&h, json!({ "kind": "all" }), json!(["url_junk", "url_variant"])).await;
+    run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["url_junk", "url_variant"]),
+    )
+    .await;
 
     let reply = get(&h.app, "/api/v1/prune/clusters?method=url&limit=10").await;
     assert_eq!(reply.status, StatusCode::OK, "{}", reply.body);
@@ -2650,7 +2755,12 @@ async fn the_sampling_plan_states_its_statistical_claim() {
     let Some(h) = harness().await else {
         return skip("the_sampling_plan_states_its_statistical_claim");
     };
-    run_scan(&h, json!({ "kind": "all" }), json!(["thin", "exact_duplicate"])).await;
+    run_scan(
+        &h,
+        json!({ "kind": "all" }),
+        json!(["thin", "exact_duplicate"]),
+    )
+    .await;
 
     let body = get(&h.app, "/api/v1/prune/sample?detector=duplicate&n=3")
         .await
@@ -2685,7 +2795,9 @@ async fn the_grace_deadline_is_written_by_the_same_clock_that_judges_it() {
         return skip("the_grace_deadline_is_written_by_the_same_clock_that_judges_it");
     };
     run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
-    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50")
+        .await
+        .json();
     let id = candidates["items"][0]["id"].as_i64().unwrap();
 
     let staged = post_json(
@@ -2710,14 +2822,16 @@ async fn the_grace_deadline_is_written_by_the_same_clock_that_judges_it() {
     );
 
     // And the response reports the deadline that was actually written.
-    let reported = staged.json()["stage_expires_at"].as_str().unwrap().to_string();
-    let stored: chrono::DateTime<chrono::Utc> = sqlx::query_scalar(
-        "SELECT stage_expires_at FROM ovis.prune_candidate WHERE id = $1",
-    )
-    .bind(id)
-    .fetch_one(&h.state.db)
-    .await
-    .unwrap();
+    let reported = staged.json()["stage_expires_at"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let stored: chrono::DateTime<chrono::Utc> =
+        sqlx::query_scalar("SELECT stage_expires_at FROM ovis.prune_candidate WHERE id = $1")
+            .bind(id)
+            .fetch_one(&h.state.db)
+            .await
+            .unwrap();
     assert_eq!(
         chrono::DateTime::parse_from_rfc3339(&reported).unwrap(),
         stored,
@@ -2734,7 +2848,9 @@ async fn a_deleted_document_lands_in_the_trash_and_can_be_restored_over_http() {
     };
     run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
 
-    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50")
+        .await
+        .json();
     let target = candidates["items"]
         .as_array()
         .unwrap()
@@ -2751,7 +2867,9 @@ async fn a_deleted_document_lands_in_the_trash_and_can_be_restored_over_http() {
     .await;
     assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
 
-    let report = prune_reaper::run_cycle(&h.state).await.expect("reaper cycle");
+    let report = prune_reaper::run_cycle(&h.state)
+        .await
+        .expect("reaper cycle");
     assert_eq!(report.deleted, 1, "the reaper deletes the due document");
 
     // Gone from Onyx.
@@ -2783,7 +2901,9 @@ async fn a_deleted_document_lands_in_the_trash_and_can_be_restored_over_http() {
     assert_eq!(detail["document"]["semantic_id"], "Old Stub");
 
     // The delete outcome records that it was trashed, not merely deleted.
-    let audit = get(&h.app, "/api/v1/prune/audit?action=deleted").await.json();
+    let audit = get(&h.app, "/api/v1/prune/audit?action=deleted")
+        .await
+        .json();
     assert_eq!(audit["items"][0]["detail"]["trashed"], true, "{audit}");
 
     // Restore it.
@@ -2818,7 +2938,9 @@ async fn purging_demands_a_typed_count_and_respects_holds() {
     run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
 
     // Stage and delete every stub so there is something in the trash.
-    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50")
+        .await
+        .json();
     let ids: Vec<i64> = candidates["items"]
         .as_array()
         .unwrap()
@@ -2832,12 +2954,20 @@ async fn purging_demands_a_typed_count_and_respects_holds() {
     )
     .await;
     assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
-    prune_reaper::run_cycle(&h.state).await.expect("reaper cycle");
+    prune_reaper::run_cycle(&h.state)
+        .await
+        .expect("reaper cycle");
 
     let trash = get(&h.app, "/api/v1/prune/trash").await.json();
     let total = trash["total"].as_i64().unwrap();
-    assert!(total >= 2, "several documents should be in the trash: {trash}");
-    let first = trash["items"][0]["document_id"].as_str().unwrap().to_string();
+    assert!(
+        total >= 2,
+        "several documents should be in the trash: {trash}"
+    );
+    let first = trash["items"][0]["document_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Without a typed count, purge refuses and says why.
     let refused = post_json(
@@ -2847,7 +2977,11 @@ async fn purging_demands_a_typed_count_and_respects_holds() {
     )
     .await;
     assert_eq!(refused.status, StatusCode::BAD_REQUEST, "{}", refused.body);
-    assert!(refused.body.contains("cannot be undone"), "{}", refused.body);
+    assert!(
+        refused.body.contains("cannot be undone"),
+        "{}",
+        refused.body
+    );
 
     // Hold it, then a correct typed count still refuses to destroy it.
     let held = post_json(
@@ -2900,7 +3034,9 @@ async fn restore_returns_the_hidden_flag_the_document_had_before_pruning() {
     };
     run_scan(&h, json!({ "kind": "all" }), json!(["thin"])).await;
 
-    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50").await.json();
+    let candidates = get(&h.app, "/api/v1/prune/candidates?limit=50")
+        .await
+        .json();
     let hidden_before = candidates["items"]
         .as_array()
         .unwrap()
@@ -2922,7 +3058,9 @@ async fn restore_returns_the_hidden_flag_the_document_had_before_pruning() {
     )
     .await;
     assert_eq!(staged.status, StatusCode::OK, "{}", staged.body);
-    prune_reaper::run_cycle(&h.state).await.expect("reaper cycle");
+    prune_reaper::run_cycle(&h.state)
+        .await
+        .expect("reaper cycle");
 
     let restored = post_json(
         &h.app,

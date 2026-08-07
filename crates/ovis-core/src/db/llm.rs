@@ -198,9 +198,9 @@ const MODEL_GROUP_BY: &str = " GROUP BY m.provider_id, p.name, p.kind, m.model_i
 
 pub async fn list_models(pool: &PgPool, provider_id: Option<i64>) -> CoreResult<Vec<ModelRow>> {
     let sql = match provider_id {
-        Some(_) => format!(
-            "{MODEL_COLUMNS} WHERE m.provider_id = $1 {MODEL_GROUP_BY} ORDER BY m.model_id"
-        ),
+        Some(_) => {
+            format!("{MODEL_COLUMNS} WHERE m.provider_id = $1 {MODEL_GROUP_BY} ORDER BY m.model_id")
+        }
         None => format!("{MODEL_COLUMNS} {MODEL_GROUP_BY} ORDER BY p.name, m.model_id"),
     };
     let mut query = sqlx::query(&sql);
@@ -304,7 +304,9 @@ pub async fn assign_role(
         .as_ref()
         .map(|c| {
             c.get("enum_enforced").and_then(serde_json::Value::as_bool) == Some(true)
-                || c.get("schema_enforced").and_then(serde_json::Value::as_bool) == Some(true)
+                || c.get("schema_enforced")
+                    .and_then(serde_json::Value::as_bool)
+                    == Some(true)
         })
         .unwrap_or(false);
     if !usable {

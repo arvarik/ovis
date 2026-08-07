@@ -242,9 +242,12 @@ impl Provider {
     }
 
     pub(crate) fn key(&self) -> CoreResult<&str> {
-        self.api_key.as_deref().filter(|k| !k.is_empty()).ok_or_else(|| {
-            CoreError::Invalid(format!("no API key configured for {}", self.kind.code()))
-        })
+        self.api_key
+            .as_deref()
+            .filter(|k| !k.is_empty())
+            .ok_or_else(|| {
+                CoreError::Invalid(format!("no API key configured for {}", self.kind.code()))
+            })
     }
 
     pub(crate) fn http(&self) -> &reqwest::Client {
@@ -379,12 +382,7 @@ mod tests {
     fn a_hosted_provider_without_a_key_is_refused_at_construction() {
         let err = Provider::new(ProviderKind::Gemini, None, None).unwrap_err();
         assert!(err.to_string().contains("requires an API key"), "{err}");
-        assert!(Provider::new(
-            ProviderKind::Gemini,
-            None,
-            Some("k".into())
-        )
-        .is_ok());
+        assert!(Provider::new(ProviderKind::Gemini, None, Some("k".into())).is_ok());
     }
 
     #[test]

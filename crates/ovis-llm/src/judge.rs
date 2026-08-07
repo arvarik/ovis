@@ -219,7 +219,10 @@ mod tests {
         let provider =
             Provider::new(ProviderKind::OpenAiCompatible, Some(&server.uri()), None).unwrap();
         let judge = Judge::new(&provider, "m", caps(false, true, false)).unwrap();
-        let grade = judge.grade("Grade 0-3.", "some document text").await.unwrap();
+        let grade = judge
+            .grade("Grade 0-3.", "some document text")
+            .await
+            .unwrap();
 
         assert_eq!(grade.score, 3);
         assert_eq!(grade.expected, None, "no distribution was offered");

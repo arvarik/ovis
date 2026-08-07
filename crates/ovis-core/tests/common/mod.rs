@@ -151,7 +151,6 @@ pub fn require_database_or_skip(test: &str) {
     }
 }
 
-
 /// Tables the seed owns, in an order that respects the foreign keys.
 const SEEDED_TABLES: [&str; 13] = [
     "document__tag",

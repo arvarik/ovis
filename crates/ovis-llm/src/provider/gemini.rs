@@ -322,7 +322,10 @@ mod tests {
         assert!(translated.get("$schema").is_none());
         // Everything meaningful survives.
         assert_eq!(translated["required"], json!(["answer"]));
-        assert_eq!(translated["properties"]["answer"]["enum"], json!(["0", "1"]));
+        assert_eq!(
+            translated["properties"]["answer"]["enum"],
+            json!(["0", "1"])
+        );
     }
 
     #[test]
@@ -377,7 +380,14 @@ mod tests {
         let flash = models.iter().find(|m| m.id.contains("flash-lite")).unwrap();
         assert_eq!(flash.advertised.reasoning, Some(true));
         assert_eq!(flash.advertised.context_tokens, Some(1048576));
-        assert!(models.iter().find(|m| m.id.contains("embedding")).unwrap().advertised.is_embedding);
+        assert!(
+            models
+                .iter()
+                .find(|m| m.id.contains("embedding"))
+                .unwrap()
+                .advertised
+                .is_embedding
+        );
     }
 
     #[tokio::test]
@@ -422,7 +432,10 @@ mod thinking_tests {
     /// 3.5 does the reverse and fails the entire request either way.
     #[test]
     fn each_generation_gets_its_own_spelling_and_the_other_as_fallback() {
-        assert_eq!(thinking_config("gemini-2.5-flash-lite")["thinkingBudget"], 0);
+        assert_eq!(
+            thinking_config("gemini-2.5-flash-lite")["thinkingBudget"],
+            0
+        );
         assert_eq!(
             thinking_config("gemini-3.5-flash-lite")["thinkingLevel"],
             "minimal"

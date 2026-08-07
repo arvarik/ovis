@@ -213,7 +213,11 @@ impl Gate {
 
 /// Compute every statistic in one pass over the text.
 pub fn measure(text: &str) -> QualityMetrics {
-    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     let words: Vec<&str> = text.split_whitespace().collect();
     let word_count = words.len();
     let line_count = lines.len();
@@ -247,15 +251,23 @@ pub fn measure(text: &str) -> QualityMetrics {
 
     // Gopher counts '#' and the ellipsis; a page full of either is machine
     // output or a truncated listing rather than prose.
-    let symbols = text.matches('#').count() + text.matches('…').count() + text.matches("...").count();
+    let symbols =
+        text.matches('#').count() + text.matches('…').count() + text.matches("...").count();
     let symbol_word_ratio = symbols as f32 / word_count as f32;
 
-    let alpha_words = words.iter().filter(|w| w.chars().any(char::is_alphabetic)).count();
+    let alpha_words = words
+        .iter()
+        .filter(|w| w.chars().any(char::is_alphabetic))
+        .count();
     let alpha_word_fraction = alpha_words as f32 / word_count as f32;
 
-    let lowered_words: Vec<String> = words.iter().map(|w| {
-        w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase()
-    }).collect();
+    let lowered_words: Vec<String> = words
+        .iter()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .collect();
     let stopword_hits = STOPWORDS
         .iter()
         .filter(|sw| lowered_words.iter().any(|w| w == *sw))
@@ -285,7 +297,9 @@ pub fn measure(text: &str) -> QualityMetrics {
 
     let has_boilerplate_marker = {
         let lowered = text.to_lowercase();
-        BOILERPLATE_MARKERS.iter().any(|marker| lowered.contains(marker))
+        BOILERPLATE_MARKERS
+            .iter()
+            .any(|marker| lowered.contains(marker))
     };
 
     QualityMetrics {
@@ -450,9 +464,7 @@ pub fn evaluate(m: &QualityMetrics, c: &QualityConfig) -> Vec<Gate> {
     {
         failures.push(Gate::RepeatedNgrams);
     }
-    if long_enough
-        && m.punct_terminated_line_fraction < c.min_punct_terminated_line_fraction
-    {
+    if long_enough && m.punct_terminated_line_fraction < c.min_punct_terminated_line_fraction {
         failures.push(Gate::UnterminatedLines);
     }
     if m.short_line_fraction > c.max_short_line_fraction {
@@ -628,7 +640,11 @@ exact commands that have to be run and the order in which they must happen.";
     #[test]
     fn correlated_line_shape_failures_alone_do_not_make_a_candidate() {
         let config = config();
-        let line_shape_only = [Gate::UnterminatedLines, Gate::ShortLines, Gate::NewlineRatio];
+        let line_shape_only = [
+            Gate::UnterminatedLines,
+            Gate::ShortLines,
+            Gate::NewlineRatio,
+        ];
         assert_eq!(families_failed(&line_shape_only), 1);
         assert!(
             !is_candidate(&line_shape_only, &config),
@@ -691,7 +707,10 @@ exact commands that have to be run and the order in which they must happen.";
         let m = measure("short");
         let text = Gate::WordCountLow.explain(&m, &config());
         assert!(text.contains('1'), "{text}");
-        assert!(text.contains("50"), "the Gopher minimum must appear: {text}");
+        assert!(
+            text.contains("50"),
+            "the Gopher minimum must appear: {text}"
+        );
     }
 
     #[test]

@@ -4,15 +4,23 @@ use ovis_prune::config::QualityConfig;
 use ovis_prune::quality;
 
 #[derive(serde::Deserialize)]
-struct Doc { text: String }
+struct Doc {
+    text: String,
+}
 
 fn main() -> anyhow::Result<()> {
     let path = std::env::args().nth(1).unwrap();
     let docs: Vec<Doc> = serde_json::from_str(&std::fs::read_to_string(path)?)?;
-    println!("{:>10} {:>10} {:>9} {:>8}", "stopword", "families", "flagged", "pct");
+    println!(
+        "{:>10} {:>10} {:>9} {:>8}",
+        "stopword", "families", "flagged", "pct"
+    );
     for stopword_min in [50usize, 75, 100, 150] {
         for min_families in [2usize, 3] {
-            let mut config = QualityConfig { min_families, ..QualityConfig::default() };
+            let mut config = QualityConfig {
+                min_families,
+                ..QualityConfig::default()
+            };
             config.stopword_min_words = stopword_min;
             let flagged = docs
                 .iter()

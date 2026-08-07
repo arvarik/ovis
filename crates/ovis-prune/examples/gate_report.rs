@@ -18,7 +18,9 @@ struct Doc {
 }
 
 fn main() -> anyhow::Result<()> {
-    let path = std::env::args().nth(1).expect("usage: gate_report <docs.json>");
+    let path = std::env::args()
+        .nth(1)
+        .expect("usage: gate_report <docs.json>");
     let docs: Vec<Doc> = serde_json::from_str(&std::fs::read_to_string(path)?)?;
     let config = QualityConfig::default();
 

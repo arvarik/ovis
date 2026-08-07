@@ -169,8 +169,7 @@ fn parse(text: &str) -> Option<(String, String)> {
     };
     let title = value.get("title")?.as_str()?.trim();
     let summary = value.get("summary")?.as_str()?.trim();
-    (!title.is_empty() && !summary.is_empty())
-        .then(|| (title.to_string(), summary.to_string()))
+    (!title.is_empty() && !summary.is_empty()).then(|| (title.to_string(), summary.to_string()))
 }
 
 /// Cut to a character budget on a word boundary where one is close by.
@@ -275,10 +274,15 @@ mod tests {
 
         let p = provider(&server.uri());
         let narrator = Narrator::new(&p, "m", caps(false, true)).unwrap();
-        let out = narrator.narrate("Name this group.", "url a\nurl b").await.unwrap();
+        let out = narrator
+            .narrate("Name this group.", "url a\nurl b")
+            .await
+            .unwrap();
 
         assert_eq!(out.title, "Archived SEP entries");
-        assert!(out.summary.starts_with("All twelve are dated archive copies"));
+        assert!(out
+            .summary
+            .starts_with("All twelve are dated archive copies"));
         assert_eq!(out.model, "m");
         assert_eq!(out.prompt_hash, prompt_hash("Name this group."));
     }
@@ -304,7 +308,11 @@ mod tests {
             .narrate("Name this group.", "evidence")
             .await
             .unwrap();
-        assert!(out.title.chars().count() <= MAX_TITLE_CHARS, "{}", out.title);
+        assert!(
+            out.title.chars().count() <= MAX_TITLE_CHARS,
+            "{}",
+            out.title
+        );
         assert!(out.summary.chars().count() <= MAX_SUMMARY_CHARS);
     }
 

@@ -50,10 +50,7 @@ pub(super) async fn list_models(provider: &Provider) -> CoreResult<Vec<ModelInfo
                 || root.contains("embed")
                 || context.is_some_and(|c| c <= 1024);
             Some(ModelInfo {
-                display_name: m
-                    .get("name")
-                    .and_then(Value::as_str)
-                    .map(str::to_string),
+                display_name: m.get("name").and_then(Value::as_str).map(str::to_string),
                 advertised: AdvertisedMetadata {
                     context_tokens: context,
                     output_tokens: m
@@ -250,7 +247,10 @@ mod tests {
         let models = provider.list_models().await.unwrap();
         let embed = models.iter().find(|m| m.id.contains("arctic")).unwrap();
         let chat = models.iter().find(|m| m.id == "qwen3-8b").unwrap();
-        assert!(embed.advertised.is_embedding, "512-token model is not a judge");
+        assert!(
+            embed.advertised.is_embedding,
+            "512-token model is not a judge"
+        );
         assert!(!chat.advertised.is_embedding);
         assert_eq!(chat.advertised.context_tokens, Some(32768));
     }

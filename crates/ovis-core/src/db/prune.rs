@@ -361,7 +361,8 @@ pub async fn list_audit(
         qb.push(" AND actor = ").push_bind(actor.clone());
     }
     if let Some(document_id) = &filter.document_id {
-        qb.push(" AND document_id = ").push_bind(document_id.clone());
+        qb.push(" AND document_id = ")
+            .push_bind(document_id.clone());
     }
     if let Some(since) = filter.since {
         qb.push(" AND at >= ").push_bind(since);
@@ -443,7 +444,9 @@ impl CandidateSort {
     fn order_by(self) -> &'static str {
         match self {
             Self::ConfidenceDesc => "pc.confidence DESC, pc.id DESC",
-            Self::ChunksDesc => "COALESCE(d.chunk_count, pc.chunk_count) DESC NULLS LAST, pc.id DESC",
+            Self::ChunksDesc => {
+                "COALESCE(d.chunk_count, pc.chunk_count) DESC NULLS LAST, pc.id DESC"
+            }
             Self::ChunksAsc => "COALESCE(d.chunk_count, pc.chunk_count) ASC NULLS LAST, pc.id DESC",
             Self::CreatedDesc => "pc.created_at DESC, pc.id DESC",
             Self::CreatedAsc => "pc.created_at ASC, pc.id ASC",
@@ -456,7 +459,9 @@ fn push_candidate_filters<'a>(qb: &mut QueryBuilder<'a, Postgres>, f: &Candidate
     qb.push(" WHERE TRUE");
     match &f.states {
         Some(states) => {
-            qb.push(" AND pc.state = ANY(").push_bind(states.clone()).push(")");
+            qb.push(" AND pc.state = ANY(")
+                .push_bind(states.clone())
+                .push(")");
         }
         None => {
             qb.push(" AND pc.state = ANY(")
@@ -584,7 +589,9 @@ pub async fn resolve_selection(
                 return Err(CoreError::Invalid("ids must not be empty".into()));
             }
             let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(CANDIDATE_COLUMNS);
-            qb.push(" WHERE pc.id = ANY(").push_bind(ids.to_vec()).push(")");
+            qb.push(" WHERE pc.id = ANY(")
+                .push_bind(ids.to_vec())
+                .push(")");
             qb.push(" ORDER BY pc.id");
             let rows = qb.build().fetch_all(pool).await?;
             Ok(rows.iter().map(row_to_candidate).collect())
@@ -1625,14 +1632,20 @@ pub async fn duplicate_hash_groups_page(
     );
     push_scope(&mut qb, scope);
     if let Some(after) = after_hash {
-        qb.push(" AND d.content_hash > ").push_bind(after.to_string());
+        qb.push(" AND d.content_hash > ")
+            .push_bind(after.to_string());
     }
     qb.push(" GROUP BY d.content_hash HAVING count(*) > 1 ORDER BY d.content_hash LIMIT ")
         .push_bind(group_limit);
     let rows = qb.build().fetch_all(pool).await?;
     Ok(rows
         .into_iter()
-        .map(|r| (r.get::<String, _>("content_hash"), r.get::<i64, _>("members")))
+        .map(|r| {
+            (
+                r.get::<String, _>("content_hash"),
+                r.get::<i64, _>("members"),
+            )
+        })
         .collect())
 }
 
@@ -1722,7 +1735,9 @@ pub async fn scan_documents_by_ids(
         return Ok(Vec::new());
     }
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(SCAN_DOC_COLUMNS);
-    qb.push(" WHERE d.id = ANY(").push_bind(ids.to_vec()).push(")");
+    qb.push(" WHERE d.id = ANY(")
+        .push_bind(ids.to_vec())
+        .push(")");
     if let Some(scope) = scope {
         push_scope(&mut qb, scope);
     }
@@ -1756,10 +1771,7 @@ pub async fn tags_for_documents(
 /// The signature store holds one config generation. When the MinHash
 /// parameters change, everything previously computed is incomparable — wipe
 /// and let the scan rebuild. Returns how many stale rows were dropped.
-pub async fn minhash_reset_if_config_changed(
-    pool: &PgPool,
-    config_hash: &str,
-) -> CoreResult<i64> {
+pub async fn minhash_reset_if_config_changed(pool: &PgPool, config_hash: &str) -> CoreResult<i64> {
     let stale: i64 =
         sqlx::query_scalar("SELECT count(*) FROM ovis.prune_minhash WHERE config_hash <> $1")
             .bind(config_hash)

@@ -215,10 +215,7 @@ pub async fn set_dup_groups(pool: &PgPool, entries: &[DupMembership]) -> CoreRes
     let mut latest: std::collections::HashMap<(&str, &str), &DupMembership> =
         std::collections::HashMap::new();
     for entry in entries {
-        latest.insert(
-            (entry.document_id.as_str(), entry.method.as_str()),
-            entry,
-        );
+        latest.insert((entry.document_id.as_str(), entry.method.as_str()), entry);
     }
     let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(
         "INSERT INTO ovis.doc_dup_group \
@@ -605,7 +602,10 @@ impl Policy {
     /// Reject a policy that cannot mean what it says, rather than silently
     /// evaluating to nothing.
     pub fn validate(&self) -> Result<(), String> {
-        for (name, t) in [("near_duplicate", &self.near_duplicate), ("semantic", &self.semantic)] {
+        for (name, t) in [
+            ("near_duplicate", &self.near_duplicate),
+            ("semantic", &self.semantic),
+        ] {
             for (level, value) in [("auto", t.auto), ("review", t.review)] {
                 if let Some(v) = value {
                     if !(0.0..=1.0).contains(&v) {
@@ -682,7 +682,11 @@ fn signal_predicates(policy: &Policy) -> Vec<SignalSql> {
             "EXISTS (SELECT 1 FROM ovis.doc_dup_group g \
                WHERE g.document_id = p.document_id AND g.method = '{method}' \
                  AND NOT g.is_keeper AND g.group_size > 1{})",
-            if guarded { " AND NOT g.cross_connector" } else { "" }
+            if guarded {
+                " AND NOT g.cross_connector"
+            } else {
+                ""
+            }
         )
     };
     let pair_same_connector = |neighbour: &str| {
@@ -763,7 +767,12 @@ fn signal_predicates(policy: &Policy) -> Vec<SignalSql> {
             flag(signal, Band::Auto, &base, Some(&guarded));
         }
         if let Some(review) = threshold.review {
-            flag(signal, Band::Review, &format!("({column} >= {review})"), None);
+            flag(
+                signal,
+                Band::Review,
+                &format!("({column} >= {review})"),
+                None,
+            );
         }
     }
 
@@ -1049,7 +1058,10 @@ pub async fn signals_for_documents(
         let mut hits: Vec<(String, String)> = Vec::new();
         for (i, signal) in signals.iter().enumerate() {
             // The strongest band wins, as in `signals_for_document`.
-            if hits.iter().any(|(name, band)| name == signal.signal && band == "auto") {
+            if hits
+                .iter()
+                .any(|(name, band)| name == signal.signal && band == "auto")
+            {
                 continue;
             }
             if row.get::<Option<bool>, _>(format!("s{i}").as_str()) == Some(true) {
@@ -1077,7 +1089,10 @@ pub async fn signals_for_document(
         // that clears auto clears review too. Reporting both would read as two
         // independent findings, so the strongest band wins and the weaker one
         // is dropped.
-        if hits.iter().any(|(name, band)| name == signal.signal && band == "auto") {
+        if hits
+            .iter()
+            .any(|(name, band)| name == signal.signal && band == "auto")
+        {
             continue;
         }
         let matched: Option<bool> = sqlx::query_scalar(&format!(
@@ -1119,7 +1134,11 @@ pub const HISTOGRAM_SIGNALS: [&str; 5] = [
 /// Bucketed distribution of one profile column — what the threshold dial is
 /// drawn from. Similarity columns bucket over 0–1; the others over their own
 /// measured range.
-pub async fn histogram(pool: &PgPool, signal: &str, buckets: i64) -> CoreResult<Vec<HistogramBucket>> {
+pub async fn histogram(
+    pool: &PgPool,
+    signal: &str,
+    buckets: i64,
+) -> CoreResult<Vec<HistogramBucket>> {
     if !HISTOGRAM_SIGNALS.contains(&signal) {
         return Err(crate::error::CoreError::Invalid(format!(
             "unknown histogram signal '{signal}'; expected one of {}",
@@ -1221,9 +1240,11 @@ pub async fn get_policy(pool: &PgPool, name: &str) -> CoreResult<Option<StoredPo
 }
 
 pub async fn active_policy(pool: &PgPool) -> CoreResult<Option<StoredPolicy>> {
-    let row = sqlx::query(&format!("{POLICY_COLUMNS} WHERE active ORDER BY updated_at DESC LIMIT 1"))
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(&format!(
+        "{POLICY_COLUMNS} WHERE active ORDER BY updated_at DESC LIMIT 1"
+    ))
+    .fetch_optional(pool)
+    .await?;
     Ok(row.as_ref().map(row_to_policy))
 }
 
@@ -1318,7 +1339,11 @@ mod tests {
 
     #[test]
     fn quality_gates_never_auto_stage_in_any_shipped_preset() {
-        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+        for policy in [
+            Policy::conservative(),
+            Policy::standard(),
+            Policy::aggressive(),
+        ] {
             assert!(
                 policy.quality.auto_min_failures.is_none(),
                 "text heuristics identify unusual documents, not worthless ones"
@@ -1353,7 +1378,11 @@ mod tests {
 
     #[test]
     fn every_shipped_preset_validates() {
-        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+        for policy in [
+            Policy::conservative(),
+            Policy::standard(),
+            Policy::aggressive(),
+        ] {
             policy.validate().expect("shipped presets must be valid");
         }
     }
@@ -1367,7 +1396,11 @@ mod tests {
         // A cross-connector guard narrows the auto clause to `(base AND
         // guard)` while review keeps the bare `base`, so the check strips a
         // trailing guard before looking for the clause.
-        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+        for policy in [
+            Policy::conservative(),
+            Policy::standard(),
+            Policy::aggressive(),
+        ] {
             let auto = band_predicate(&policy, Band::Auto);
             let review = band_predicate(&policy, Band::Review);
             for signal in signal_predicates(&policy) {
@@ -1464,7 +1497,11 @@ mod tests {
     /// zero while the per-signal breakdown showed 31 hits.
     #[test]
     fn band_predicates_treat_unmeasured_columns_as_no_match_not_as_unknown() {
-        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+        for policy in [
+            Policy::conservative(),
+            Policy::standard(),
+            Policy::aggressive(),
+        ] {
             for band in [Band::Auto, Band::Review] {
                 let sql = band_predicate(&policy, band);
                 assert!(
@@ -1519,7 +1556,11 @@ mod tests {
 
     #[test]
     fn policies_round_trip_through_json() {
-        for policy in [Policy::conservative(), Policy::standard(), Policy::aggressive()] {
+        for policy in [
+            Policy::conservative(),
+            Policy::standard(),
+            Policy::aggressive(),
+        ] {
             let json = serde_json::to_value(&policy).unwrap();
             let back: Policy = serde_json::from_value(json).unwrap();
             assert_eq!(policy, back);

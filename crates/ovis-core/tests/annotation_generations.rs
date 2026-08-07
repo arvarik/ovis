@@ -47,13 +47,12 @@ async fn a_changed_prompt_creates_a_generation_rather_than_overwriting() {
     .await
     .expect("second generation");
 
-    let rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM ovis.llm_annotation WHERE subject_key = $1",
-    )
-    .bind(CLUSTER)
-    .fetch_one(&db.pool)
-    .await
-    .expect("counting generations");
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ovis.llm_annotation WHERE subject_key = $1")
+            .bind(CLUSTER)
+            .fetch_one(&db.pool)
+            .await
+            .expect("counting generations");
     assert_eq!(rows, 2, "the earlier generation must survive");
 
     // The read path takes the newest, so the second one is what a reviewer sees.
@@ -82,13 +81,12 @@ async fn an_identical_rerun_refreshes_rather_than_accumulating() {
         .expect("record");
     }
 
-    let rows: i64 = sqlx::query_scalar(
-        "SELECT count(*) FROM ovis.llm_annotation WHERE subject_key = $1",
-    )
-    .bind(CLUSTER)
-    .fetch_one(&db.pool)
-    .await
-    .expect("counting");
+    let rows: i64 =
+        sqlx::query_scalar("SELECT count(*) FROM ovis.llm_annotation WHERE subject_key = $1")
+            .bind(CLUSTER)
+            .fetch_one(&db.pool)
+            .await
+            .expect("counting");
     assert_eq!(rows, 1);
 
     let newest = annotation::newest_for(&db.pool, "cluster", &[CLUSTER.to_string()])
@@ -161,10 +159,11 @@ async fn an_unknown_subject_kind_is_refused() {
     };
     assert!(annotation::ensure_tables(&db.pool).await);
 
-    let err = annotation::record(
-        &db.pool, "wishful", "k", "T", "S", None, "m", "p",
-    )
-    .await
-    .unwrap_err();
-    assert!(err.to_string().contains("unknown annotation subject kind"), "{err}");
+    let err = annotation::record(&db.pool, "wishful", "k", "T", "S", None, "m", "p")
+        .await
+        .unwrap_err();
+    assert!(
+        err.to_string().contains("unknown annotation subject kind"),
+        "{err}"
+    );
 }

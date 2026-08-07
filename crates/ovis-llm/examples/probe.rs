@@ -15,7 +15,11 @@ use ovis_llm::{handshake, Provider, ProviderKind};
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut args = std::env::args().skip(1);
-    let kind = ProviderKind::parse(&args.next().expect("usage: probe <kind> [url] [key] [model]"))?;
+    let kind = ProviderKind::parse(
+        &args
+            .next()
+            .expect("usage: probe <kind> [url] [key] [model]"),
+    )?;
     let url = args.next().filter(|s| !s.is_empty());
     let key = args.next().filter(|s| !s.is_empty());
     let only = args.next();

@@ -472,10 +472,8 @@ mod tests {
 
     #[test]
     fn partial_yaml_fills_the_rest_with_defaults() {
-        let config = PruneConfig::from_yaml(
-            "language:\n  enabled: true\n  allowed: [en, de]\n",
-        )
-        .unwrap();
+        let config =
+            PruneConfig::from_yaml("language:\n  enabled: true\n  allowed: [en, de]\n").unwrap();
         assert!(config.language.enabled);
         assert_eq!(config.language.allowed, vec!["en", "de"]);
         // Untouched sections keep their defaults.
@@ -519,9 +517,6 @@ mod tests {
     #[test]
     fn null_overrides_are_the_identity() {
         let base = PruneConfig::default();
-        assert_eq!(
-            base.with_overrides(&serde_json::Value::Null).unwrap(),
-            base
-        );
+        assert_eq!(base.with_overrides(&serde_json::Value::Null).unwrap(), base);
     }
 }

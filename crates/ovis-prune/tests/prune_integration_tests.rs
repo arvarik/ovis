@@ -4,9 +4,7 @@
 //! detectors; the kept core — config round-trip + MinHash dedup — is what
 //! these cover.)
 
-use ovis_prune::{
-    DocumentWithContent, MinHashDedupEngine, PreferKeepPolicy, PruneConfig,
-};
+use ovis_prune::{DocumentWithContent, MinHashDedupEngine, PreferKeepPolicy, PruneConfig};
 
 fn make_doc(id: &str, link: Option<&str>, content: &str) -> DocumentWithContent {
     DocumentWithContent {
@@ -67,7 +65,10 @@ language:
     let pairs = engine.detect_duplicates(&docs, config.dedup.prefer_keep);
     assert_eq!(pairs.len(), 1, "only the near-copy pair is detected");
     let pair = &pairs[0];
-    assert_eq!(pair.kept_document_id, "https://a/guide", "shortest URL wins");
+    assert_eq!(
+        pair.kept_document_id, "https://a/guide",
+        "shortest URL wins"
+    );
     assert_eq!(pair.duplicate_document_id, "https://a/guide/print/view");
     assert!(pair.jaccard_similarity >= 0.85);
     assert!(pair.reason.contains("shortest URL"));
