@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.package]
-version = "1.0.1"
+version = "1.0.2"
 license = "Apache-2.0"
 repository = "https://github.com/arvarik/ovis"
 
@@ -33,7 +33,7 @@ reqwest = { version = "0.12", features = ["json", "gzip"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 chrono = { version = "0.4", features = ["serde"] }
-base64 = "0.22"
+base64 = "0.23"
 
 # --- errors ---
 thiserror = "2.0"
@@ -43,7 +43,7 @@ anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
 metrics = "0.24"
-metrics-exporter-prometheus = { version = "0.17", default-features = false }
+metrics-exporter-prometheus = { version = "0.18", default-features = false }
 
 # --- http server ---
 axum = { version = "0.8", features = ["macros"] }
