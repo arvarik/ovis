@@ -48,7 +48,7 @@ metrics-exporter-prometheus = { version = "0.18", default-features = false }
 # --- http server ---
 axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
-tower-http = { version = "0.6", features = [
+tower-http = { version = "0.7", features = [
     "cors",
     "trace",
     "timeout",
