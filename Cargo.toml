@@ -27,7 +27,7 @@ sqlx = { version = "0.8", features = [
     "chrono",
     "json",
 ] }
-reqwest = { version = "0.12", features = ["json", "gzip"] }
+reqwest = { version = "0.13", features = ["json", "gzip"] }
 
 # --- serialization ---
 serde = { version = "1.0", features = ["derive"] }
