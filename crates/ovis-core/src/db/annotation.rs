@@ -48,7 +48,7 @@ const DDL: &[&str] = &[
 
 pub async fn ensure_tables(pool: &PgPool) -> bool {
     for statement in DDL {
-        if let Err(err) = sqlx::query(statement).execute(pool).await {
+        if let Err(err) = sqlx::query(*statement).execute(pool).await {
             tracing::warn!(
                 error = %err,
                 "cannot create ovis.llm_annotation; generated titles will be unavailable"

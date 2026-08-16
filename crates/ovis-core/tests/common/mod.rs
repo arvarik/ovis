@@ -193,7 +193,7 @@ const OVIS_TABLES: [&str; 12] = [
 /// transaction, so there would be nothing left to roll back around it.
 pub async fn reseed(pool: &PgPool) {
     for table in SEEDED_TABLES {
-        sqlx::query(&format!("DELETE FROM public.{table}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM public.{table}")))
             .execute(pool)
             .await
             .unwrap_or_else(|e| panic!("clearing {table}: {e}"));
@@ -201,7 +201,7 @@ pub async fn reseed(pool: &PgPool) {
     // Best-effort: these tables only exist once the relevant `ensure_tables`
     // has run, and a fresh database legitimately has none of them.
     for table in OVIS_TABLES {
-        let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM ovis.{table}")))
             .execute(pool)
             .await;
     }

@@ -267,7 +267,7 @@ const STARTER_RULES: &[(&str, &str, &str)] = &[
 /// reports the feature unavailable rather than half-working.
 pub async fn ensure_tables(pool: &PgPool) -> bool {
     for statement in DDL {
-        if let Err(err) = sqlx::query(statement).execute(pool).await {
+        if let Err(err) = sqlx::query(*statement).execute(pool).await {
             tracing::warn!(
                 error = %err,
                 "cannot create the ovis.prune_* tables; pruning endpoints will answer 503"
@@ -455,7 +455,7 @@ impl CandidateSort {
     }
 }
 
-fn push_candidate_filters<'a>(qb: &mut QueryBuilder<'a, Postgres>, f: &CandidateFilter) {
+fn push_candidate_filters(qb: &mut QueryBuilder<Postgres>, f: &CandidateFilter) {
     qb.push(" WHERE TRUE");
     match &f.states {
         Some(states) => {
@@ -1396,7 +1396,7 @@ pub async fn create_scan(
 }
 
 pub async fn get_scan(pool: &PgPool, id: i64) -> CoreResult<Option<PruneScanItem>> {
-    let row = sqlx::query(&format!("{SCAN_COLUMNS} WHERE id = $1"))
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!("{SCAN_COLUMNS} WHERE id = $1")))
         .bind(id)
         .fetch_optional(pool)
         .await?;
@@ -1427,10 +1427,10 @@ pub async fn list_scans(
 /// The scan the runner should work on: the running one if any (resume after a
 /// restart), otherwise the oldest queued one.
 pub async fn next_scan_to_run(pool: &PgPool) -> CoreResult<Option<PruneScanItem>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "{SCAN_COLUMNS} WHERE status IN ('running', 'queued') \
          ORDER BY CASE status WHEN 'running' THEN 0 ELSE 1 END, id ASC LIMIT 1"
-    ))
+    )))
     .fetch_optional(pool)
     .await?;
     Ok(row.as_ref().map(row_to_scan))
@@ -1553,7 +1553,7 @@ pub struct ScanDocRow {
     pub cc_pair_status: Option<String>,
 }
 
-fn push_scope<'a>(qb: &mut QueryBuilder<'a, Postgres>, scope: &PruneScope) {
+fn push_scope(qb: &mut QueryBuilder<Postgres>, scope: &PruneScope) {
     match scope.kind.as_str() {
         "connectors" => {
             qb.push(
@@ -2048,8 +2048,11 @@ mod tests {
         let mut qb: QueryBuilder<Postgres> = QueryBuilder::new(SCAN_DOC_COLUMNS);
         qb.push(" WHERE d.chunk_count = 0");
         let sql = qb.into_sql();
-        assert!(sql.contains("d.chunk_count = 0"));
-        assert!(!sql.to_lowercase().contains("coalesce(d.chunk_count"));
+        assert!(sql.as_str().contains("d.chunk_count = 0"));
+        assert!(!sql
+            .as_str()
+            .to_lowercase()
+            .contains("coalesce(d.chunk_count"));
     }
 
     #[test]

@@ -903,12 +903,12 @@ pub async fn simulate(pool: &PgPool, policy: &Policy) -> CoreResult<SimulationRe
     let review = band_predicate(policy, Band::Review);
     let exempt = exemption_predicate(policy);
 
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT count(*) AS profiled, \
                 count(*) FILTER (WHERE {exempt} AND {auto}) AS auto_count, \
                 count(*) FILTER (WHERE {exempt} AND {review} AND NOT ({auto})) AS review_count \
          FROM ovis.doc_profile p"
-    ))
+    )))
     .fetch_one(pool)
     .await?;
 
@@ -918,10 +918,10 @@ pub async fn simulate(pool: &PgPool, policy: &Policy) -> CoreResult<SimulationRe
 
     let mut by_signal = Vec::new();
     for signal in signal_predicates(policy) {
-        let count: i64 = sqlx::query_scalar(&format!(
+        let count: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM ovis.doc_profile p WHERE {exempt} AND COALESCE({}, FALSE)",
             signal.sql
-        ))
+        )))
         .fetch_one(pool)
         .await?;
         if count > 0 {
@@ -934,7 +934,7 @@ pub async fn simulate(pool: &PgPool, policy: &Policy) -> CoreResult<SimulationRe
     }
     by_signal.sort_by_key(|s| std::cmp::Reverse(s.count));
 
-    let connector_rows = sqlx::query(&format!(
+    let connector_rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT p.connector_id, c.name AS connector_name, \
                 count(*) FILTER (WHERE {auto}) AS auto_count, \
                 count(*) FILTER (WHERE {review} AND NOT ({auto})) AS review_count \
@@ -943,7 +943,7 @@ pub async fn simulate(pool: &PgPool, policy: &Policy) -> CoreResult<SimulationRe
          WHERE {exempt} AND {review} \
          GROUP BY p.connector_id, c.name \
          ORDER BY count(*) DESC LIMIT 50"
-    ))
+    )))
     .fetch_all(pool)
     .await?;
 
@@ -982,11 +982,11 @@ pub async fn documents_in_band(
         Band::Review => format!("{review} AND NOT ({auto})"),
         Band::None => return Ok(Vec::new()),
     };
-    Ok(sqlx::query_scalar(&format!(
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT p.document_id FROM ovis.doc_profile p \
          WHERE {exempt} AND ({predicate}) AND ($1::text IS NULL OR p.document_id > $1) \
          ORDER BY p.document_id LIMIT $2"
-    ))
+    )))
     .bind(after)
     .bind(limit)
     .fetch_all(pool)
@@ -1009,10 +1009,10 @@ pub async fn sample_band(
         Band::Review => format!("{review} AND NOT ({auto})"),
         Band::None => return Ok(Vec::new()),
     };
-    Ok(sqlx::query_scalar(&format!(
+    Ok(sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "SELECT p.document_id FROM ovis.doc_profile p \
          WHERE {exempt} AND ({predicate}) ORDER BY random() LIMIT $1"
-    ))
+    )))
     .bind(n)
     .fetch_all(pool)
     .await?)
@@ -1045,10 +1045,10 @@ pub async fn signals_for_documents(
         .enumerate()
         .map(|(i, s)| format!("COALESCE({}, FALSE) AS s{i}", s.sql))
         .collect();
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT p.document_id, {} FROM ovis.doc_profile p WHERE p.document_id = ANY($1)",
         columns.join(", ")
-    ))
+    )))
     .bind(ids.to_vec())
     .fetch_all(pool)
     .await?;
@@ -1095,10 +1095,10 @@ pub async fn signals_for_document(
         {
             continue;
         }
-        let matched: Option<bool> = sqlx::query_scalar(&format!(
+        let matched: Option<bool> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT COALESCE({}, FALSE) FROM ovis.doc_profile p WHERE p.document_id = $1",
             signal.sql
-        ))
+        )))
         .bind(document_id)
         .fetch_optional(pool)
         .await?
@@ -1150,11 +1150,11 @@ pub async fn histogram(
         "max_jaccard" | "max_cosine" => (0.0, 1.0),
         "centroid_pct" => (0.0, 100.0),
         _ => {
-            let row = sqlx::query(&format!(
+            let row = sqlx::query(sqlx::AssertSqlSafe(format!(
                 "SELECT COALESCE(min({signal}), 0)::float8 AS lo, \
                         COALESCE(max({signal}), 0)::float8 AS hi \
                  FROM ovis.doc_profile WHERE {signal} IS NOT NULL"
-            ))
+            )))
             .fetch_one(pool)
             .await?;
             (row.get("lo"), row.get("hi"))
@@ -1163,11 +1163,11 @@ pub async fn histogram(
     if hi <= lo {
         return Ok(Vec::new());
     }
-    let rows = sqlx::query(&format!(
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
         "SELECT width_bucket({signal}::float8, $1, $2, $3) AS bucket, count(*) AS n \
          FROM ovis.doc_profile WHERE {signal} IS NOT NULL \
          GROUP BY bucket ORDER BY bucket"
-    ))
+    )))
     .bind(lo)
     .bind(hi)
     .bind(buckets as i32)
@@ -1225,24 +1225,28 @@ const POLICY_COLUMNS: &str =
     "SELECT id, name, tier, body, config_hash, active, created_at, updated_at FROM ovis.prune_policy";
 
 pub async fn list_policies(pool: &PgPool) -> CoreResult<Vec<StoredPolicy>> {
-    let rows = sqlx::query(&format!("{POLICY_COLUMNS} ORDER BY name"))
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{POLICY_COLUMNS} ORDER BY name"
+    )))
+    .fetch_all(pool)
+    .await?;
     Ok(rows.iter().map(row_to_policy).collect())
 }
 
 pub async fn get_policy(pool: &PgPool, name: &str) -> CoreResult<Option<StoredPolicy>> {
-    let row = sqlx::query(&format!("{POLICY_COLUMNS} WHERE name = $1"))
-        .bind(name)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{POLICY_COLUMNS} WHERE name = $1"
+    )))
+    .bind(name)
+    .fetch_optional(pool)
+    .await?;
     Ok(row.as_ref().map(row_to_policy))
 }
 
 pub async fn active_policy(pool: &PgPool) -> CoreResult<Option<StoredPolicy>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "{POLICY_COLUMNS} WHERE active ORDER BY updated_at DESC LIMIT 1"
-    ))
+    )))
     .fetch_optional(pool)
     .await?;
     Ok(row.as_ref().map(row_to_policy))

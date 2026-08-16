@@ -62,7 +62,7 @@ const DDL: &[&str] = &[
 
 pub async fn ensure_tables(pool: &PgPool) -> bool {
     for statement in DDL {
-        if let Err(err) = sqlx::query(statement).execute(pool).await {
+        if let Err(err) = sqlx::query(*statement).execute(pool).await {
             tracing::warn!(
                 error = %err,
                 "cannot create the ovis.llm_* tables; LLM features will report unavailable"
@@ -101,17 +101,21 @@ const PROVIDER_COLUMNS: &str =
     "SELECT id, name, kind, base_url, api_key_ref, enabled, created_at FROM ovis.llm_provider";
 
 pub async fn list_providers(pool: &PgPool) -> CoreResult<Vec<ProviderRow>> {
-    let rows = sqlx::query(&format!("{PROVIDER_COLUMNS} ORDER BY name"))
-        .fetch_all(pool)
-        .await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{PROVIDER_COLUMNS} ORDER BY name"
+    )))
+    .fetch_all(pool)
+    .await?;
     Ok(rows.iter().map(row_to_provider).collect())
 }
 
 pub async fn get_provider(pool: &PgPool, id: i64) -> CoreResult<Option<ProviderRow>> {
-    let row = sqlx::query(&format!("{PROVIDER_COLUMNS} WHERE id = $1"))
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "{PROVIDER_COLUMNS} WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
     Ok(row.as_ref().map(row_to_provider))
 }
 
@@ -203,7 +207,7 @@ pub async fn list_models(pool: &PgPool, provider_id: Option<i64>) -> CoreResult<
         }
         None => format!("{MODEL_COLUMNS} {MODEL_GROUP_BY} ORDER BY p.name, m.model_id"),
     };
-    let mut query = sqlx::query(&sql);
+    let mut query = sqlx::query(sqlx::AssertSqlSafe(sql));
     if let Some(id) = provider_id {
         query = query.bind(id);
     }
@@ -341,11 +345,11 @@ pub async fn clear_role(pool: &PgPool, role: &str) -> CoreResult<()> {
 
 /// The model currently holding a role, if any.
 pub async fn model_for_role(pool: &PgPool, role: &str) -> CoreResult<Option<ModelRow>> {
-    let row = sqlx::query(&format!(
+    let row = sqlx::query(sqlx::AssertSqlSafe(format!(
         "{MODEL_COLUMNS} WHERE EXISTS (SELECT 1 FROM ovis.llm_role x \
          WHERE x.role = $1 AND x.provider_id = m.provider_id AND x.model_id = m.model_id) \
          {MODEL_GROUP_BY}"
-    ))
+    )))
     .bind(role)
     .fetch_optional(pool)
     .await?;

@@ -190,7 +190,10 @@ pub async fn count_attempts(
 
 pub async fn get_attempt(pool: &PgPool, id: i32) -> CoreResult<Option<IndexAttemptItem>> {
     let sql = format!("{ATTEMPT_SELECT} WHERE ia.id = $1");
-    let row: Option<AttemptRow> = sqlx::query_as(&sql).bind(id).fetch_optional(pool).await?;
+    let row: Option<AttemptRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
     Ok(row.map(|r| r.into_item(Utc::now())))
 }
 
@@ -407,7 +410,7 @@ mod tests {
         );
         qb.push(")");
         let sql = qb.into_sql();
-        assert!(!sql.contains("DROP TABLE"));
-        assert!(sql.contains("upper(ia.status) = ANY($1)"));
+        assert!(!sql.as_str().contains("DROP TABLE"));
+        assert!(sql.as_str().contains("upper(ia.status) = ANY($1)"));
     }
 }

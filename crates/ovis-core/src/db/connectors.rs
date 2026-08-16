@@ -110,14 +110,16 @@ impl From<SummaryRow> for ConnectorSummary {
 /// Ordered by document count so the biggest connectors lead.
 pub async fn list_summaries(pool: &PgPool) -> CoreResult<Vec<ConnectorSummary>> {
     let sql = format!("{SUMMARY_SQL} ORDER BY doc_count DESC, cc_pair_id");
-    let rows: Vec<SummaryRow> = sqlx::query_as(&sql).fetch_all(pool).await?;
+    let rows: Vec<SummaryRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
+        .fetch_all(pool)
+        .await?;
     Ok(rows.into_iter().map(ConnectorSummary::from).collect())
 }
 
 /// One cc-pair's summary.
 pub async fn get_summary(pool: &PgPool, cc_pair_id: i32) -> CoreResult<Option<ConnectorSummary>> {
     let sql = format!("{SUMMARY_SQL} WHERE cc.id = $1");
-    let row: Option<SummaryRow> = sqlx::query_as(&sql)
+    let row: Option<SummaryRow> = sqlx::query_as(sqlx::AssertSqlSafe(sql))
         .bind(cc_pair_id)
         .fetch_optional(pool)
         .await?;
@@ -419,7 +421,10 @@ pub async fn top_connectors(
          LIMIT $1"
     );
 
-    let rows = sqlx::query(&sql).bind(limit).fetch_all(pool).await?;
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .bind(limit)
+        .fetch_all(pool)
+        .await?;
     Ok(rows
         .into_iter()
         .map(|r| TopConnector {

@@ -20,14 +20,14 @@ tokio = { version = "1.47", features = ["full"] }
 tokio-stream = "0.1"
 
 # --- data access ---
-sqlx = { version = "0.8", features = [
+sqlx = { version = "0.9", features = [
     "runtime-tokio",
     "tls-native-tls",
     "postgres",
     "chrono",
     "json",
 ] }
-reqwest = { version = "0.12", features = ["json", "gzip"] }
+reqwest = { version = "0.13", features = ["json", "gzip", "form", "query"] }
 
 # --- serialization ---
 serde = { version = "1.0", features = ["derive"] }
@@ -48,7 +48,7 @@ metrics-exporter-prometheus = { version = "0.18", default-features = false }
 # --- http server ---
 axum = { version = "0.8", features = ["macros"] }
 tower = { version = "0.5", features = ["util", "timeout"] }
-tower-http = { version = "0.6", features = [
+tower-http = { version = "0.7", features = [
     "cors",
     "trace",
     "timeout",
