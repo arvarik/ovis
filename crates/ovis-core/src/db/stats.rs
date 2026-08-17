@@ -136,7 +136,7 @@ pub async fn timeline(
         unit = bucket.trunc_unit()
     );
 
-    let rows = sqlx::query(&sql)
+    let rows = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(window.hours())
         .fetch_all(pool)
         .await?;

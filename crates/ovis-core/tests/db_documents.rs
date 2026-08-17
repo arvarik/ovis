@@ -586,9 +586,9 @@ async fn deleting_a_tagged_document_succeeds_and_clears_every_fk_child() {
         ("chunk_stats", "document_id"),
         ("document_by_connector_credential_pair", "id"),
     ] {
-        let remaining: i64 = sqlx::query_scalar(&format!(
+        let remaining: i64 = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT count(*) FROM public.{table} WHERE {column} = $1"
-        ))
+        )))
         .bind(docs::DELETE_ME)
         .fetch_one(&pool)
         .await

@@ -89,7 +89,7 @@ impl DocumentFilter {
 /// the shape of the whole query. `d` must be aliased to `public.document`.
 ///
 /// Everything caller-supplied is bound, never interpolated.
-fn push_filters<'a>(qb: &mut QueryBuilder<'a, Postgres>, f: &DocumentFilter, plan: &ConnectorPlan) {
+fn push_filters(qb: &mut QueryBuilder<Postgres>, f: &DocumentFilter, plan: &ConnectorPlan) {
     qb.push(" WHERE TRUE");
 
     if let Some(term) = &f.search {
@@ -264,7 +264,7 @@ fn escape_like(term: &str) -> String {
 /// Output-column aliases (`sort_ts`) are not visible in `WHERE`, so the recency
 /// sorts repeat the `COALESCE` expression — which is exactly the expression the
 /// index is built on, so it still seeks rather than scans.
-fn push_keyset<'a>(qb: &mut QueryBuilder<'a, Postgres>, sort: SortOrder, cursor: &Cursor) {
+fn push_keyset(qb: &mut QueryBuilder<Postgres>, sort: SortOrder, cursor: &Cursor) {
     match sort {
         SortOrder::UpdatedDesc => {
             qb.push(" AND (COALESCE(d.doc_updated_at, d.last_modified), d.id) < (");
@@ -370,7 +370,7 @@ FROM (SELECT DISTINCT z.id \
       WHERE z.connector_id = ANY(";
 const FROM_CONNECTOR_IDS_TAIL: &str = ")) m JOIN public.document d ON d.id = m.id ";
 
-fn push_from<'a>(qb: &mut QueryBuilder<'a, Postgres>, plan: &ConnectorPlan, with_lateral: bool) {
+fn push_from(qb: &mut QueryBuilder<Postgres>, plan: &ConnectorPlan, with_lateral: bool) {
     match plan {
         ConnectorPlan::Unfiltered | ConnectorPlan::Broad(_) => {
             qb.push(FROM_DOCUMENT);
@@ -783,7 +783,10 @@ pub async fn delete_document_cascading(
     for (table, column) in DOCUMENT_FK_CHILD_TABLES {
         // Table and column names come from the const above, never from input.
         let sql = format!("DELETE FROM public.{table} WHERE {column} = $1");
-        sqlx::query(&sql).bind(id).execute(&mut *tx).await?;
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
     }
 
     let deleted = sqlx::query("DELETE FROM public.document WHERE id = $1")
@@ -844,7 +847,10 @@ pub async fn delete_document_in_tx(
     for (table, column) in DOCUMENT_FK_CHILD_TABLES {
         // Table and column names come from the const above, never from input.
         let sql = format!("DELETE FROM public.{table} WHERE {column} = $1");
-        sqlx::query(&sql).bind(id).execute(&mut **tx).await?;
+        sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(id)
+            .execute(&mut **tx)
+            .await?;
     }
     let deleted = sqlx::query("DELETE FROM public.document WHERE id = $1")
         .bind(id)
@@ -877,7 +883,7 @@ mod tests {
             push_keyset(&mut qb, sort, c);
         }
         qb.push(" ORDER BY ").push(sort.order_by());
-        qb.into_sql()
+        qb.into_sql().as_str().to_string()
     }
 
     fn built_list_sql(filter: &DocumentFilter, sort: SortOrder, position: Position<'_>) -> String {
@@ -992,8 +998,9 @@ mod tests {
             push_filters(&mut qb, &DocumentFilter::default(), &plan);
             let sql = qb.into_sql();
             assert!(
-                !sql.contains("LEFT JOIN LATERAL"),
-                "counting does not need the connector lateral: {sql}"
+                !sql.as_str().contains("LEFT JOIN LATERAL"),
+                "counting does not need the connector lateral: {}",
+                sql.as_str()
             );
         }
     }

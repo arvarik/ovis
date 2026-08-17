@@ -72,8 +72,8 @@ mod tests {
         qb.push(" AND t.tag_key = ");
         qb.push_bind("author'; DROP TABLE tag; --".to_string());
         let sql = qb.into_sql();
-        assert!(!sql.contains("DROP TABLE"));
-        assert!(sql.contains("t.tag_key = $1"));
+        assert!(!sql.as_str().contains("DROP TABLE"));
+        assert!(sql.as_str().contains("t.tag_key = $1"));
     }
 
     #[test]

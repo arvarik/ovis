@@ -317,7 +317,7 @@ async fn reseed(pool: &sqlx::PgPool) {
         "credential",
         "search_settings",
     ] {
-        sqlx::query(&format!("DELETE FROM public.{table}"))
+        sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM public.{table}")))
             .execute(pool)
             .await
             .unwrap_or_else(|e| panic!("clearing {table}: {e}"));
@@ -345,7 +345,7 @@ async fn reseed(pool: &sqlx::PgPool) {
         "llm_provider",
     ] {
         // The tables may not exist yet on a fresh test database.
-        let _ = sqlx::query(&format!("DELETE FROM ovis.{table}"))
+        let _ = sqlx::query(sqlx::AssertSqlSafe(format!("DELETE FROM ovis.{table}")))
             .execute(pool)
             .await;
     }
