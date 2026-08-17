@@ -36,66 +36,68 @@ export function PruneView() {
   const status = useQuery(pruneStatusQuery);
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-4 p-4 md:p-6">
-      <header>
-        <h1 className="font-display font-display-soft text-headline text-ink">Prune</h1>
-        <p className="mt-1 text-label text-ink-mute">
-          Find junk, review it in groups, stage reversibly. Deletion happens only in the
-          reaper, after the grace period — and what it deletes goes to the trash, where it
-          stays restorable.
-        </p>
-      </header>
+    <div className="h-full overflow-y-auto overscroll-contain">
+      <div className="mx-auto w-full max-w-6xl space-y-4 p-4 pb-24 md:p-6 md:pb-24">
+        <header>
+          <h1 className="font-display font-display-soft text-headline text-ink">Prune</h1>
+          <p className="mt-1 text-label text-ink-mute">
+            Find junk, review it in groups, stage reversibly. Deletion happens only in the
+            reaper, after the grace period — and what it deletes goes to the trash, where it
+            stays restorable.
+          </p>
+        </header>
 
-      {status.data ? <StatusStrip status={status.data} /> : null}
+        {status.data ? <StatusStrip status={status.data} /> : null}
 
-      <TabsRoot
-        value={tab}
-        onValueChange={(next) =>
-          void navigate({ search: { tab: next as PruneTab }, replace: true })
-        }
-      >
-        <TabsList>
-          <TabsTrigger value="triage">Triage</TabsTrigger>
-          <TabsTrigger value="review">Review</TabsTrigger>
-          <TabsTrigger value="clusters">Clusters</TabsTrigger>
-          <TabsTrigger value="staged">
-            Staged{status.data && status.data.staged > 0 ? ` · ${formatCount(status.data.staged)}` : ''}
-          </TabsTrigger>
-          <TabsTrigger value="trash">
-            Trash{status.data && status.data.trash ? ` · ${formatCount(status.data.trash.items)}` : ''}
-          </TabsTrigger>
-          <TabsTrigger value="rules">Rules</TabsTrigger>
-          <TabsTrigger value="history">History</TabsTrigger>
-        </TabsList>
-        <TabsContent value="triage" className="pt-4">
-          <TriageTab
-            onOpenBundle={(bundle) =>
-              void navigate({
-                search: { tab: 'review', detector: bundle.detector ?? undefined },
-                replace: true,
-              })
-            }
-          />
-        </TabsContent>
-        <TabsContent value="review" className="pt-4">
-          <ReviewTab />
-        </TabsContent>
-        <TabsContent value="clusters" className="pt-4">
-          <ClustersTab />
-        </TabsContent>
-        <TabsContent value="staged" className="pt-4">
-          <StagedTab />
-        </TabsContent>
-        <TabsContent value="trash" className="pt-4">
-          <TrashTab />
-        </TabsContent>
-        <TabsContent value="rules" className="pt-4">
-          <RulesTab />
-        </TabsContent>
-        <TabsContent value="history" className="pt-4">
-          <HistoryTab />
-        </TabsContent>
-      </TabsRoot>
+        <TabsRoot
+          value={tab}
+          onValueChange={(next) =>
+            void navigate({ search: { tab: next as PruneTab }, replace: true })
+          }
+        >
+          <TabsList>
+            <TabsTrigger value="triage">Triage</TabsTrigger>
+            <TabsTrigger value="review">Review</TabsTrigger>
+            <TabsTrigger value="clusters">Clusters</TabsTrigger>
+            <TabsTrigger value="staged">
+              Staged{status.data && status.data.staged > 0 ? ` · ${formatCount(status.data.staged)}` : ''}
+            </TabsTrigger>
+            <TabsTrigger value="trash">
+              Trash{status.data && status.data.trash ? ` · ${formatCount(status.data.trash.items)}` : ''}
+            </TabsTrigger>
+            <TabsTrigger value="rules">Rules</TabsTrigger>
+            <TabsTrigger value="history">History</TabsTrigger>
+          </TabsList>
+          <TabsContent value="triage" className="pt-4">
+            <TriageTab
+              onOpenBundle={(bundle) =>
+                void navigate({
+                  search: { tab: 'review', detector: bundle.detector ?? undefined },
+                  replace: true,
+                })
+              }
+            />
+          </TabsContent>
+          <TabsContent value="review" className="pt-4">
+            <ReviewTab />
+          </TabsContent>
+          <TabsContent value="clusters" className="pt-4">
+            <ClustersTab />
+          </TabsContent>
+          <TabsContent value="staged" className="pt-4">
+            <StagedTab />
+          </TabsContent>
+          <TabsContent value="trash" className="pt-4">
+            <TrashTab />
+          </TabsContent>
+          <TabsContent value="rules" className="pt-4">
+            <RulesTab />
+          </TabsContent>
+          <TabsContent value="history" className="pt-4">
+            <HistoryTab />
+          </TabsContent>
+        </TabsRoot>
+      </div>
     </div>
   );
 }

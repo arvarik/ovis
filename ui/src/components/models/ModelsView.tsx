@@ -82,44 +82,46 @@ export function ModelsView() {
   const items = providers.data?.items ?? [];
 
   return (
-    <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
-      <header className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="font-display font-display-soft text-headline text-ink">Models</h1>
-          <p className="mt-1 max-w-2xl text-label text-ink-mute">
-            Connect any endpoint that serves an LLM — your own box or a hosted API. OVIS lists
-            what it offers, then tests each model to see which output constraints actually
-            hold. Only models that pass can be given work.
-          </p>
-        </div>
-        <Button onClick={() => setConnecting(true)}>Connect an endpoint</Button>
-      </header>
+    <div className="h-full overflow-y-auto overscroll-contain">
+      <div className="mx-auto w-full max-w-6xl space-y-6 p-4 pb-24 md:p-6 md:pb-24">
+        <header className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-display font-display-soft text-headline text-ink">Models</h1>
+            <p className="mt-1 max-w-2xl text-label text-ink-mute">
+              Connect any endpoint that serves an LLM — your own box or a hosted API. OVIS lists
+              what it offers, then tests each model to see which output constraints actually
+              hold. Only models that pass can be given work.
+            </p>
+          </div>
+          <Button onClick={() => setConnecting(true)}>Connect an endpoint</Button>
+        </header>
 
-      {items.length === 0 ? (
-        <EmptyState
-          title="No endpoints connected"
-          description="Point OVIS at a local llama.cpp or Ollama server, an OpenAI-compatible endpoint, or a hosted API. Nothing in pruning requires one — this only adds relevance judging and narration."
-          action={<Button onClick={() => setConnecting(true)}>Connect an endpoint</Button>}
-        />
-      ) : (
-        <>
-          <RolesPanel roles={roles.data} models={models.data?.items ?? []} />
-          <section className="space-y-3">
-            <h2 className="font-display font-display-soft text-title text-ink">Endpoints</h2>
-            {items.map((provider) => (
-              <ProviderCard
-                key={provider.id}
-                provider={provider}
-                models={(models.data?.items ?? []).filter(
-                  (m) => m.provider_id === provider.id,
-                )}
-              />
-            ))}
-          </section>
-        </>
-      )}
+        {items.length === 0 ? (
+          <EmptyState
+            title="No endpoints connected"
+            description="Point OVIS at a local llama.cpp or Ollama server, an OpenAI-compatible endpoint, or a hosted API. Nothing in pruning requires one — this only adds relevance judging and narration."
+            action={<Button onClick={() => setConnecting(true)}>Connect an endpoint</Button>}
+          />
+        ) : (
+          <>
+            <RolesPanel roles={roles.data} models={models.data?.items ?? []} />
+            <section className="space-y-3">
+              <h2 className="font-display font-display-soft text-title text-ink">Endpoints</h2>
+              {items.map((provider) => (
+                <ProviderCard
+                  key={provider.id}
+                  provider={provider}
+                  models={(models.data?.items ?? []).filter(
+                    (m) => m.provider_id === provider.id,
+                  )}
+                />
+              ))}
+            </section>
+          </>
+        )}
 
-      {connecting ? <ConnectDialog onClose={() => setConnecting(false)} /> : null}
+        {connecting ? <ConnectDialog onClose={() => setConnecting(false)} /> : null}
+      </div>
     </div>
   );
 }
