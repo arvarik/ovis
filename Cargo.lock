@@ -2430,7 +2430,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-backend"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "arc-swap",
@@ -2467,7 +2467,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-bench"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "clap",
  "reqwest",
@@ -2478,7 +2478,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-cli"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anstream 0.6.21",
  "anstyle",
@@ -2517,7 +2517,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-core"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "base64 0.23.1",
  "chrono",
@@ -2536,7 +2536,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-llm"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "chrono",
  "ovis-core",
@@ -2551,7 +2551,7 @@ dependencies = [
 
 [[package]]
 name = "ovis-prune"
-version = "1.0.2"
+version = "1.0.3"
 dependencies = [
  "anyhow",
  "chrono",
