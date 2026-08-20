@@ -11,7 +11,7 @@ repository.workspace = true
 ovis-core = { path = "../ovis-core" }
 ovis-llm = { path = "../ovis-llm" }
 ovis-prune = { path = "../ovis-prune" }
-sha2 = "0.10"
+sha2 = "0.11"
 regex = "1.10"
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
