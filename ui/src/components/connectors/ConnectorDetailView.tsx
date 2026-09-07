@@ -80,10 +80,13 @@ export function AttemptRow({ attempt, showConnector }: { attempt: IndexAttemptIt
   const [expanded, setExpanded] = useState(false);
   const inProgress = attempt.status === 'IN_PROGRESS';
   const started = attempt.time_started ? Date.parse(attempt.time_started) : null;
+  const updated = attempt.time_updated ? Date.parse(attempt.time_updated) : null;
   // For running attempts time_updated advances with each heartbeat, so
   // started→updated is the honest "elapsed so far" without a render clock.
   const elapsed =
-    started !== null ? duration((Date.parse(attempt.time_updated) - started) / 1000) : null;
+    started !== null && updated !== null && !isNaN(started) && !isNaN(updated)
+      ? duration((updated - started) / 1000)
+      : null;
   const progress =
     attempt.total_batches !== null && attempt.total_batches > 0
       ? Math.min(1, attempt.completed_batches / attempt.total_batches)
@@ -97,7 +100,10 @@ export function AttemptRow({ attempt, showConnector }: { attempt: IndexAttemptIt
       )}
     >
       <div className="flex flex-wrap items-center gap-2">
-        <Badge tone={statusTone(attempt.status)}>
+        <Badge tone={statusTone(attempt.status)} className="inline-flex items-center gap-1.5">
+          {inProgress ? (
+            <span className="size-1.5 rounded-full bg-mint animate-pulse" aria-hidden />
+          ) : null}
           {attempt.status === 'NOT_STARTED' ? 'QUEUED' : attempt.status}
         </Badge>
         {attempt.parked ? <ParkedBadge /> : null}
@@ -124,7 +130,7 @@ export function AttemptRow({ attempt, showConnector }: { attempt: IndexAttemptIt
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-caption text-ink-mute">
         <span>+{formatCount(attempt.new_docs_indexed ?? 0)} docs</span>
         <span>{formatCount(attempt.total_chunks)} chunks</span>
-        {attempt.pages_per_min !== null ? <span className="text-mint">{attempt.pages_per_min.toFixed(1)} pages/min</span> : null}
+        {attempt.pages_per_min != null ? <span className="text-mint">{attempt.pages_per_min.toFixed(1)} pages/min</span> : null}
         {elapsed ? <span>{elapsed} elapsed</span> : null}
         {inProgress && attempt.last_heartbeat_time && !attempt.stalled ? (
           <span className="flex items-center gap-1">

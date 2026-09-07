@@ -106,18 +106,18 @@ function StatusStrip({ status }: { status: PruneStatusResponse }) {
   const now = useNow();
   const reaper = status.reaper;
 
-  const reaperValue = reaper.halted
+  const reaperValue = reaper?.halted
     ? 'halted'
-    : reaper.deferred > 0
+    : (reaper?.deferred ?? 0) > 0
       ? `deferred ${formatCount(reaper.deferred)}`
-      : reaper.next_run_at
+      : reaper?.next_run_at
         ? `next in ${graceCountdown(reaper.next_run_at, now)}`
         : 'idle';
-  const reaperCaption = reaper.halted
+  const reaperCaption = reaper?.halted
     ? (reaper.halted_reason ?? 'refusing to delete')
-    : reaper.deferred > 0
-      ? (reaper.deferred_reason ?? undefined)
-      : `${formatCount(reaper.deleted_last_hour)} deleted last hour · limit ${formatCount(status.limits.max_docs_per_hour)}/h`;
+    : (reaper?.deferred ?? 0) > 0
+      ? (reaper?.deferred_reason ?? undefined)
+      : `${formatCount(reaper?.deleted_last_hour ?? 0)} deleted last hour · limit ${formatCount(status.limits?.max_docs_per_hour ?? 0)}/h`;
 
   return (
     <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
@@ -137,7 +137,7 @@ function StatusStrip({ status }: { status: PruneStatusResponse }) {
         label="reaper"
         value={reaperValue}
         caption={reaperCaption}
-        tone={reaper.halted ? 'rose' : reaper.deferred > 0 ? 'gold' : 'default'}
+        tone={reaper?.halted ? 'rose' : (reaper?.deferred ?? 0) > 0 ? 'gold' : 'default'}
       />
     </div>
   );

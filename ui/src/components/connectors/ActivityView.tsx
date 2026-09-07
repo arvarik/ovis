@@ -47,8 +47,15 @@ export function ActivityView() {
         <div className="flex items-center justify-between gap-2">
           <h1 className="font-display font-display-soft text-display text-ink">Activity</h1>
           <Button variant="ghost" size="sm" onClick={() => setAutoRefresh((a) => !a)} aria-pressed={autoRefresh}>
-            {autoRefresh ? <Pause className="size-4" aria-hidden /> : <Play className="size-4" aria-hidden />}
-            {autoRefresh ? 'Auto-refresh on' : 'Auto-refresh paused'}
+            {autoRefresh ? <Pause className="size-3.5" aria-hidden /> : <Play className="size-3.5" aria-hidden />}
+            {autoRefresh ? (
+              <span className="flex items-center gap-1.5">
+                <span className="size-1.5 rounded-full bg-mint animate-pulse" aria-hidden />
+                Auto-refresh on · 15s
+              </span>
+            ) : (
+              'Auto-refresh paused'
+            )}
           </Button>
         </div>
 

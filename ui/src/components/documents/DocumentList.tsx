@@ -1,4 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   ArrowDown,
@@ -10,6 +11,7 @@ import {
   MoreHorizontal,
 } from 'lucide-react';
 import { toast } from 'sonner';
+import { pageChunksQuery, pageDetailQuery } from '@/api/queries';
 import { cn } from '@/lib/cn';
 import { absolute, compact, relative } from '@/lib/format';
 import { Checkbox } from '@/components/primitives/Checkbox';
@@ -157,7 +159,21 @@ export function DocumentList({
   const scrollRef = useRef<HTMLDivElement>(null);
   const isCards = width > 0 && width < CARD_BREAK;
   const showWide = width >= WIDE_BREAK;
+  const queryClient = useQueryClient();
+  const prefetchTimer = useRef<number | null>(null);
 
+  const handlePrefetch = (id: string) => {
+    if (prefetchTimer.current) {
+      window.clearTimeout(prefetchTimer.current);
+    }
+    prefetchTimer.current = window.setTimeout(() => {
+      void queryClient.prefetchQuery(pageDetailQuery(id));
+      void queryClient.prefetchInfiniteQuery(pageChunksQuery(id));
+    }, 60);
+  };
+
+  // TanStack Virtual returns mutable functions; React Compiler skips memoization here by design.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
@@ -263,6 +279,8 @@ export function DocumentList({
                 role="listitem"
                 tabIndex={0}
                 onClick={openRow}
+                onMouseEnter={() => handlePrefetch(row.id)}
+                onFocus={() => handlePrefetch(row.id)}
                 onKeyDown={(e) => {
                   if (e.target !== e.currentTarget) return;
                   if (e.key === 'Enter' || e.key === ' ') {

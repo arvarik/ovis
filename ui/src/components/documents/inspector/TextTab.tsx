@@ -66,6 +66,8 @@ export function TextTab({ docId }: { docId: string }) {
     return out;
   }, [find, lines]);
 
+  // TanStack Virtual returns mutable functions; React Compiler skips memoization here by design.
+  // eslint-disable-next-line react-hooks/incompatible-library
   const virtualizer = useVirtualizer({
     count: lines.length,
     getScrollElement: () => scrollRef.current,

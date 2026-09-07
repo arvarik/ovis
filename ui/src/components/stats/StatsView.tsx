@@ -573,15 +573,17 @@ export function StatsView() {
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-label="Disk used"
-                  className="h-1.5 overflow-hidden rounded-full bg-well"
+                  className="relative h-2 overflow-hidden rounded-full bg-well"
                 >
                   <div
                     className={cn(
-                      'h-full rounded-full',
+                      'h-full rounded-full transition-all duration-300',
                       diskPct >= 85 ? 'bg-rose' : diskPct >= 75 ? 'bg-gold' : 'bg-mint',
                     )}
                     style={{ width: `${Math.min(diskPct, 100)}%` }}
                   />
+                  <span className="absolute top-0 bottom-0 left-[75%] w-0.5 bg-gold/50" title="75% warning watermark" />
+                  <span className="absolute top-0 bottom-0 left-[85%] w-0.5 bg-rose/50" title="85% flood watermark" />
                 </div>
                 <div
                   className={cn(
@@ -606,6 +608,9 @@ export function StatsView() {
               <div className="font-mono text-caption text-ink-faint">
                 <span className="text-mint">{o.connectors.active} active</span> ·{' '}
                 {o.connectors.paused} paused · <span className="text-gold">{o.connectors.parked} parked</span>
+                {o.connectors.invalid > 0 ? (
+                  <> · <span className="text-rose font-medium">{o.connectors.invalid} invalid</span></>
+                ) : null}
               </div>
             ) : null}
           </Card>

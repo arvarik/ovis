@@ -43,6 +43,8 @@ export function TriageTab({ onOpenBundle }: { onOpenBundle: (bundle: PruneBundle
   }
 
   const data = overview.data;
+  const bundles = data.bundles ?? [];
+  const byConnector = data.by_connector ?? [];
 
   return (
     <div className="space-y-6">
@@ -57,16 +59,16 @@ export function TriageTab({ onOpenBundle }: { onOpenBundle: (bundle: PruneBundle
               duplicate clusters from the Clusters tab.
             </p>
           </div>
-          <NarrateButton subjectKind="bundle" disabled={data.bundles.length === 0} />
+          <NarrateButton subjectKind="bundle" disabled={bundles.length === 0} />
         </div>
-        {data.bundles.length === 0 ? (
+        {bundles.length === 0 ? (
           <EmptyState
             title="Nothing flagged yet"
             description="Run a scan from the Review tab. A scan is a preview — it never hides or deletes anything."
           />
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-            {data.bundles.map((bundle) => (
+            {bundles.map((bundle) => (
               <BundleCard
                 key={bundle.key}
                 bundle={bundle}
@@ -80,7 +82,7 @@ export function TriageTab({ onOpenBundle }: { onOpenBundle: (bundle: PruneBundle
 
       <PolicyStudio />
 
-      {data.by_connector.length > 0 ? <ConnectorTable rows={data.by_connector} /> : null}
+      {byConnector.length > 0 ? <ConnectorTable rows={byConnector} /> : null}
 
       {sampling ? <SampleSheet bundle={sampling} onClose={() => setSampling(null)} /> : null}
     </div>

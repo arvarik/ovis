@@ -20,22 +20,28 @@ function recentCutoff(): string {
   return new Date(Math.floor(Date.now() / HOUR) * HOUR - 24 * HOUR).toISOString();
 }
 
-interface PresetDef {
+export interface PresetDef {
   key: PresetKey;
   label: string;
   params: () => Partial<PagesSearch>;
 }
 
 /** The param fields presets own — applying a preset clears the others. */
-const PRESET_FIELDS: (keyof PagesSearch)[] = ['chunk_min', 'chunk_max', 'hidden', 'updated_after'];
+export const PRESET_FIELDS: (keyof PagesSearch)[] = ['chunk_min', 'chunk_max', 'hidden', 'updated_after'];
 
-const PRESETS: PresetDef[] = [
+export const PRESETS: PresetDef[] = [
   { key: 'all', label: 'All', params: () => ({}) },
   { key: 'stubs', label: 'Stubs', params: () => ({ chunk_min: 0, chunk_max: 0 }) },
   { key: 'heavy', label: 'Heavy', params: () => ({ chunk_min: 11 }) },
   { key: 'recent', label: 'Recent', params: () => ({ updated_after: recentCutoff() }) },
   { key: 'hidden', label: 'Hidden', params: () => ({ hidden: true }) },
 ];
+
+export function getPresetSearch(def: PresetDef, prev: PagesSearch): PagesSearch {
+  const next: PagesSearch = { ...prev };
+  for (const f of PRESET_FIELDS) delete next[f];
+  return { ...next, ...def.params() };
+}
 
 export function activePreset(search: PagesSearch): PresetKey | null {
   if (search.chunk_min === 0 && search.chunk_max === 0) return 'stubs';
@@ -46,7 +52,7 @@ export function activePreset(search: PagesSearch): PresetKey | null {
   return anyPresetField ? null : 'all';
 }
 
-function Chip({ def, search }: { def: PresetDef; search: PagesSearch }) {
+function Chip({ def, index, search }: { def: PresetDef; index: number; search: PagesSearch }) {
   const navigate = useNavigate();
   const active = activePreset(search) === def.key;
 
@@ -65,11 +71,7 @@ function Chip({ def, search }: { def: PresetDef; search: PagesSearch }) {
   const apply = () => {
     void navigate({
       to: '/pages',
-      search: (prev) => {
-        const next: PagesSearch = { ...(prev as PagesSearch) };
-        for (const f of PRESET_FIELDS) delete next[f];
-        return { ...next, ...def.params() };
-      },
+      search: (prev) => getPresetSearch(def, prev as PagesSearch),
     });
   };
 
@@ -78,14 +80,24 @@ function Chip({ def, search }: { def: PresetDef; search: PagesSearch }) {
       type="button"
       onClick={apply}
       aria-pressed={active}
+      title={`Preset: ${def.label} (${index + 1})`}
       className={cn(
-        'flex min-h-11 shrink-0 snap-start items-center gap-1.5 rounded-full border px-3.5 text-label transition-colors md:min-h-8',
+        'flex min-h-11 shrink-0 snap-start items-center gap-1.5 rounded-full border px-3 text-label transition-colors md:min-h-8',
         active
           ? 'border-gold/40 bg-gold/15 text-gold'
           : 'border-line bg-surface text-ink-mute hover:bg-hover hover:text-ink',
       )}
     >
-      {def.label}
+      <span>{def.label}</span>
+      <span
+        aria-hidden
+        className={cn(
+          'hidden size-4 items-center justify-center rounded font-mono text-[10px] sm:inline-flex',
+          active ? 'bg-gold/20 text-gold' : 'bg-well text-ink-faint',
+        )}
+      >
+        {index + 1}
+      </span>
       {count.data ? (
         <span className={cn('font-mono text-caption', active ? 'text-gold/80' : 'text-ink-faint')}>
           {count.data.exact ? '' : '~'}
@@ -106,8 +118,8 @@ export function PresetChips() {
       aria-label="Presets"
       className="flex snap-x items-center gap-2 overflow-x-auto pb-0.5 [scrollbar-width:none]"
     >
-      {PRESETS.map((def) => (
-        <Chip key={def.key} def={def} search={search} />
+      {PRESETS.map((def, index) => (
+        <Chip key={def.key} def={def} index={index} search={search} />
       ))}
     </div>
   );
