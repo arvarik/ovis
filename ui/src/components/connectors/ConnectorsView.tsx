@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { useQuery } from '@tanstack/react-query';
-import { MoreHorizontal, Pause, Play, SearchX, X } from 'lucide-react';
+import { AlertTriangle, MoreHorizontal, Pause, Play, SearchX, X } from 'lucide-react';
 import { connectorsQuery } from '@/api/queries';
 import { usePauseResume } from '@/api/mutations';
 import type { ConnectorSummary } from '@/api/types';
@@ -16,6 +16,7 @@ import { MenuRoot, MenuTrigger, MenuContent } from '@/components/primitives/Menu
 import { Select } from '@/components/primitives/Select';
 import { Skeleton } from '@/components/primitives/Skeleton';
 import { useContainerWidth } from '@/hooks/useContainerWidth';
+import { useHotkeys } from '@/hooks/hotkeys';
 import { connectorsRoute, type ConnectorsSearch, type ConnectorsSort } from '@/routes/connectors';
 import {
   ConnectorMenuItems,
@@ -27,12 +28,13 @@ import {
   type ConnectorDialogKind,
 } from './connectorShared';
 
-/** Status-filter values: real statuses plus the flag pseudo-statuses `errored`/`parked`. */
-type StatusFilter = 'active' | 'paused' | 'initial_indexing' | 'errored' | 'parked';
+/** Status-filter values: real statuses plus the flag pseudo-statuses `errored`/`parked`/`attention`. */
+type StatusFilter = 'active' | 'paused' | 'initial_indexing' | 'errored' | 'parked' | 'attention';
 
 function applyFilters(list: ConnectorSummary[], search: ConnectorsSearch): ConnectorSummary[] {
   let out = list;
-  if (search.status === 'errored') out = out.filter((c) => c.in_repeated_error_state);
+  if (search.status === 'attention') out = out.filter((c) => c.in_repeated_error_state || c.parked);
+  else if (search.status === 'errored') out = out.filter((c) => c.in_repeated_error_state);
   else if (search.status === 'parked') out = out.filter((c) => c.parked);
   else if (search.status) {
     const wanted = search.status.toUpperCase();
@@ -144,6 +146,27 @@ export function ConnectorsView() {
 
   const sources = useMemo(() => [...new Set(all.map((c) => c.source))].sort(), [all]);
 
+  const [activeIndex, setActiveIndex] = useState(0);
+  const clampedActive = Math.min(activeIndex, Math.max(rows.length - 1, 0));
+
+  useHotkeys(
+    [
+      { keys: 'j', description: 'Next connector', group: 'Fleet', scope: 'route', handler: () => setActiveIndex((i) => Math.min(rows.length - 1, i + 1)) },
+      { keys: 'k', description: 'Previous connector', group: 'Fleet', scope: 'route', handler: () => setActiveIndex((i) => Math.max(0, i - 1)) },
+      {
+        keys: 'enter',
+        description: 'Open connector detail',
+        group: 'Fleet',
+        scope: 'route',
+        handler: () => {
+          const c = rows[clampedActive];
+          if (c) void navigate({ to: '/connectors/$ccPairId', params: { ccPairId: c.cc_pair_id } });
+        },
+      },
+    ],
+    rows.length > 0,
+  );
+
   const toggleStatus = (value: StatusFilter) =>
     update({ status: search.status === value ? undefined : value });
 
@@ -175,6 +198,28 @@ export function ConnectorsView() {
           <SummaryTile label="Repeated errors" value={counts.errored} tone="rose" active={search.status === 'errored'} onClick={() => toggleStatus('errored')} />
           <SummaryTile label="Parked" value={counts.parked} tone="gold" active={search.status === 'parked'} onClick={() => toggleStatus('parked')} />
         </div>
+
+        {(counts.errored > 0 || counts.parked > 0) && search.status !== 'attention' && search.status !== 'errored' && search.status !== 'parked' ? (
+          <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-gold/40 bg-gold/10 px-3.5 py-2.5">
+            <div className="flex items-center gap-2 text-label text-gold">
+              <AlertTriangle className="size-4 shrink-0 text-gold" aria-hidden />
+              <span>
+                <strong>{counts.errored + counts.parked} connectors need attention:</strong>{' '}
+                {counts.errored > 0 ? `${counts.errored} repeated error${counts.errored > 1 ? 's' : ''}` : ''}
+                {counts.errored > 0 && counts.parked > 0 ? ' · ' : ''}
+                {counts.parked > 0 ? `${counts.parked} parked` : ''}
+              </span>
+            </div>
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={() => toggleStatus('attention')}
+              className="border-gold/30 text-gold hover:bg-gold/20"
+            >
+              Filter attention ({counts.errored + counts.parked})
+            </Button>
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap items-center gap-2">
           <Input
@@ -231,8 +276,9 @@ export function ConnectorsView() {
       ) : (
         <div className="mt-2 min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 pb-24 md:px-4">
           <ul className={cn(isCards ? 'space-y-2' : 'divide-y divide-line/60')}>
-            {rows.map((c) => {
+            {rows.map((c, i) => {
               const isSelected = selected.has(c.cc_pair_id);
+              const isActive = i === clampedActive;
               const open = () =>
                 void navigate({ to: '/connectors/$ccPairId', params: { ccPairId: c.cc_pair_id } });
 
@@ -264,6 +310,9 @@ export function ConnectorsView() {
                       className={cn(
                         'cursor-pointer rounded-xl border p-3.5 transition-colors',
                         isSelected ? 'border-gold/40 bg-active/50' : 'border-line bg-surface hover:bg-hover',
+                        isActive && 'ring-1 ring-gold/60',
+                        c.in_repeated_error_state && 'border-rose/40 bg-rose/[0.02]',
+                        c.parked && !c.in_repeated_error_state && 'border-gold/40 bg-gold/[0.02]',
                       )}
                     >
                       <div className="flex items-start justify-between gap-2">
@@ -290,7 +339,7 @@ export function ConnectorsView() {
                         ) : (
                           <span className="text-ink-faint">no success yet</span>
                         )}
-                        {c.in_repeated_error_state ? <span className="text-rose">repeated errors</span> : null}
+                        {c.in_repeated_error_state ? <span className="text-rose font-medium">repeated errors</span> : null}
                       </div>
                     </div>
                   </li>
@@ -304,6 +353,9 @@ export function ConnectorsView() {
                     className={cn(
                       'group grid cursor-pointer items-center gap-3 px-1 py-2 transition-colors hover:bg-hover/60',
                       isSelected && 'bg-active/40',
+                      isActive && 'bg-active/30 ring-1 ring-inset ring-gold/40',
+                      c.in_repeated_error_state && 'bg-rose/[0.02]',
+                      c.parked && !c.in_repeated_error_state && 'bg-gold/[0.02]',
                     )}
                     style={{ gridTemplateColumns: '1.75rem minmax(0,1.4fr) 6rem 5.5rem minmax(0,1fr) 2.75rem' }}
                   >

@@ -16,7 +16,7 @@ import { useHotkeys } from '@/hooks/hotkeys';
 import { pagesRoute, SEARCH_MODES, type PagesSearch } from '@/routes/pages';
 import { DocumentList, type ExplorerRow } from './DocumentList';
 import { FilterButton, useUpdatePagesSearch } from './FilterControls';
-import { PresetChips } from './PresetChips';
+import { activePreset, getPresetSearch, PRESETS, PresetChips } from './PresetChips';
 import { SelectionBar } from './SelectionBar';
 import { useLivePages } from './useLivePages';
 
@@ -176,6 +176,29 @@ export function PagesView() {
       },
     });
   };
+
+  const applyPresetIndex = useCallback(
+    (index: number) => {
+      const def = PRESETS[index];
+      if (!def) return;
+      void navigate({
+        to: '/pages',
+        search: (prev) => getPresetSearch(def, prev as PagesSearch),
+      });
+    },
+    [navigate],
+  );
+
+  useHotkeys(
+    [
+      { keys: '1', description: 'Preset: All', group: 'Presets', scope: 'route', handler: () => applyPresetIndex(0) },
+      { keys: '2', description: 'Preset: Stubs', group: 'Presets', scope: 'route', handler: () => applyPresetIndex(1) },
+      { keys: '3', description: 'Preset: Heavy', group: 'Presets', scope: 'route', handler: () => applyPresetIndex(2) },
+      { keys: '4', description: 'Preset: Recent', group: 'Presets', scope: 'route', handler: () => applyPresetIndex(3) },
+      { keys: '5', description: 'Preset: Hidden', group: 'Presets', scope: 'route', handler: () => applyPresetIndex(4) },
+    ],
+    true,
+  );
 
   useHotkeys(
     [
@@ -377,16 +400,30 @@ export function PagesView() {
         <EmptyState
           icon={<SearchX aria-hidden />}
           title={isSearchMode ? `No matches for “${search.q}”` : 'No pages match'}
-          description={recap !== '' ? `Filters: ${recap}` : undefined}
+          description={
+            recap !== ''
+              ? `No documents matched active filters: ${recap}. Try clearing filters or switching presets.`
+              : 'The corpus does not have any indexed documents matching this view.'
+          }
           action={
-            <Button
-              variant="secondary"
-              onClick={() =>
-                void navigate({ to: '/pages', search: isSearchMode ? { q: search.q } : {} })
-              }
-            >
-              Clear filters
-            </Button>
+            <div className="flex flex-wrap items-center justify-center gap-2">
+              <Button
+                variant="secondary"
+                onClick={() =>
+                  void navigate({ to: '/pages', search: isSearchMode ? { q: search.q } : {} })
+                }
+              >
+                Clear all filters
+              </Button>
+              {activePreset(search) !== 'all' ? (
+                <Button
+                  variant="ghost"
+                  onClick={() => applyPresetIndex(0)}
+                >
+                  Reset to All (1)
+                </Button>
+              ) : null}
+            </div>
           }
         />
       ) : (
