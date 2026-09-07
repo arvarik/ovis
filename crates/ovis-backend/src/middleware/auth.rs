@@ -20,6 +20,7 @@ use crate::state::AppState;
 /// Paths reachable without a token even when auth is on.
 const OPEN_PATHS: [&str; 1] = ["/api/v1/system/health"];
 
+#[allow(clippy::result_large_err)]
 pub async fn require_bearer(
     State(state): State<AppState>,
     request: Request,

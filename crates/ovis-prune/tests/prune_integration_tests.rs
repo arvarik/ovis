@@ -97,8 +97,10 @@ fn signatures_survive_serialisation_boundaries() {
 
     let bytes: Vec<u8> = sig.iter().flat_map(|v| v.to_le_bytes()).collect();
     let restored: Vec<u64> = bytes
-        .chunks_exact(8)
-        .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+        .as_chunks::<8>()
+        .0
+        .iter()
+        .map(|c| u64::from_le_bytes(*c))
         .collect();
     assert_eq!(sig, restored);
     assert_eq!(engine.jaccard_similarity(&sig, &restored), 1.0);

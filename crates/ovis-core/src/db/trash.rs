@@ -283,7 +283,9 @@ fn expand_vectors(source: &mut Value) {
             continue;
         };
         let floats: Vec<Value> = bytes
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|pair| {
                 let bits = u16::from_le_bytes([pair[0], pair[1]]);
                 json!(f16_bits_to_f32(bits))

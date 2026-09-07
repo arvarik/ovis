@@ -133,12 +133,13 @@ pub(super) async fn complete(
     // The two generations disagree about how thinking is controlled, and the
     // model listing does not say which family a model belongs to. Rather than
     // hard-coding a name prefix that will be wrong at the next release, try
-    // the other spelling once before giving up.
+    // the other spelling once before giving up, and fall back to omitting
+    // thinkingConfig if the model rejects suppression altogether.
     let response = match first {
         Ok(response) => response,
         Err(err) if req.suppress_thinking && is_invalid_argument(&err) => {
             generation["thinkingConfig"] = alternate_thinking_config(&req.model);
-            send_json(
+            let second = send_json(
                 provider
                     .http()
                     .post(&url)
@@ -146,7 +147,25 @@ pub(super) async fn complete(
                     .json(&build(&generation)),
                 "completion",
             )
-            .await?
+            .await;
+            match second {
+                Ok(response) => response,
+                Err(err2) if is_invalid_argument(&err2) => {
+                    if let Some(obj) = generation.as_object_mut() {
+                        obj.remove("thinkingConfig");
+                    }
+                    send_json(
+                        provider
+                            .http()
+                            .post(&url)
+                            .query(&[("key", key)])
+                            .json(&build(&generation)),
+                        "completion",
+                    )
+                    .await?
+                }
+                Err(err2) => return Err(err2),
+            }
         }
         Err(err) => return Err(err),
     };
@@ -221,7 +240,11 @@ pub(super) async fn complete(
 /// look incapable of constrained output when it is not.
 fn thinking_config(model: &str) -> Value {
     if model.starts_with("gemini-3") {
-        json!({ "thinkingLevel": "minimal" })
+        if model.contains("pro") {
+            json!({ "thinkingLevel": "low" })
+        } else {
+            json!({ "thinkingLevel": "minimal" })
+        }
     } else {
         json!({ "thinkingBudget": 0 })
     }

@@ -125,7 +125,7 @@ pub fn select_columns(
 /// The boxed, coloured table for a terminal.
 pub fn render_boxed(grid: &Grid, color: bool, max_width: u16) -> String {
     let mut table = Table::new();
-    table.load_preset(comfy_table::presets::UTF8_FULL);
+    table.load_style(comfy_table::presets::UTF8_FULL);
     // Dynamic arrangement everywhere: the old `page inspect` table overflowed
     // any terminal narrower than its widest cell.
     table.set_content_arrangement(ContentArrangement::Dynamic);

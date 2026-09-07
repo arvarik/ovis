@@ -19,7 +19,7 @@ function NotFound() {
   );
 }
 
-function RootError({ error, reset }: { error: Error; reset: () => void }) {
+function RootError({ error, reset }: { error: unknown; reset: () => void }) {
   return <ErrorState error={error} onRetry={reset} title="The view crashed" />;
 }
 

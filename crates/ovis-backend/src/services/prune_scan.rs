@@ -1325,8 +1325,10 @@ async fn near_pairs_for_bucket(
         .iter()
         .map(|(id, bytes)| {
             let sig: Vec<u64> = bytes
-                .chunks_exact(8)
-                .map(|c| u64::from_le_bytes(c.try_into().unwrap()))
+                .as_chunks::<8>()
+                .0
+                .iter()
+                .map(|c| u64::from_le_bytes(*c))
                 .collect();
             (id.clone(), sig)
         })

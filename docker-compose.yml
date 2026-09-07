@@ -48,6 +48,10 @@ services:
       OVIS_API_TOKEN: ${OVIS_API_TOKEN:-}
       OVIS_CORS_ORIGINS: ${OVIS_CORS_ORIGINS:-*}
 
+      # --- optional: llm provider keys ---
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OVIS_GEMINI_API_KEY: ${OVIS_GEMINI_API_KEY:-}
+
       OVIS_LOG_FORMAT: ${OVIS_LOG_FORMAT:-text}
       RUST_LOG: ${RUST_LOG:-ovis_backend=info,ovis_core=info,tower_http=warn,sqlx=warn}
     healthcheck:
