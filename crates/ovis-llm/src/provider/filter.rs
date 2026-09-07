@@ -267,9 +267,7 @@ pub fn keep_latest_per_family(kind: ProviderKind, models: Vec<ModelInfo>) -> Vec
             let mut kept = if let Some(max) = max_gen {
                 let same_gen: Vec<ModelInfo> = group
                     .into_iter()
-                    .filter(|m| {
-                        extract_generation(&m.id).is_some_and(|g| (g - max).abs() < 0.001)
-                    })
+                    .filter(|m| extract_generation(&m.id).is_some_and(|g| (g - max).abs() < 0.001))
                     .collect();
                 let stable: Vec<ModelInfo> = same_gen
                     .iter()
