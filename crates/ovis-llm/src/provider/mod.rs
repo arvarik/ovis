@@ -6,6 +6,7 @@
 //! differences visible in one file instead of scattered across five.
 
 mod anthropic;
+pub mod filter;
 mod gemini;
 mod llamacpp;
 mod ollama;
@@ -272,18 +273,16 @@ impl Provider {
         }
     }
 
-    /// Every model the endpoint offers, normalized.
+    /// Every model the endpoint offers, normalized and filtered to latest active chat models.
     pub async fn list_models(&self) -> CoreResult<Vec<ModelInfo>> {
-        let mut models = match self.kind {
+        let models = match self.kind {
             ProviderKind::OpenAiCompatible => openai::list_models(self).await?,
             ProviderKind::Gemini => gemini::list_models(self).await?,
             ProviderKind::Anthropic => anthropic::list_models(self).await?,
             ProviderKind::Ollama => ollama::list_models(self).await?,
             ProviderKind::LlamaCpp => llamacpp::list_models(self).await?,
         };
-        models.sort_by(|a, b| a.id.cmp(&b.id));
-        models.dedup_by(|a, b| a.id == b.id);
-        Ok(models)
+        Ok(filter::filter_models(self.kind, models))
     }
 
     /// One constrained completion.

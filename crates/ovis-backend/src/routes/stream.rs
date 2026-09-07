@@ -35,6 +35,7 @@ use crate::state::AppState;
 
 const KEEPALIVE_SECS: u64 = 15;
 
+#[allow(clippy::result_large_err)]
 pub async fn stream(
     State(state): State<AppState>,
     extensions: axum::http::Extensions,
